@@ -24,7 +24,6 @@
 ```text
 bid-system/
 ├── AGENTS.md                         # 跨编码 Agent 的项目事实与硬约束，精简
-├── CLAUDE.md                         # 导入 AGENTS.md，补充 Claude Code 说明
 ├── PROJECT_MEMORY.md                 # 当前产品与业务设计基线
 ├── pyproject.toml                    # 后端工作区、统一 lint/test 配置
 ├── package.json                      # 仅在前端/工作区需要时添加
@@ -61,13 +60,7 @@ bid-system/
 │   ├── adr/                          # Architecture Decision Records
 │   ├── domain/
 │   └── operations/
-└── .claude/                          # Claude Code 研发辅助，不参与线上运行
-    ├── agents/
-    ├── skills/
-    ├── rules/
-    └── settings.json
 ```
-
 ## 3. 后端业务模块
 
 ```text
@@ -286,41 +279,10 @@ prompts/
 ```
 
 Skill 存放较稳定、按需加载的领域知识；Prompt 存放某个模型调用的明确指令和输出 schema。二者都必须版本化，并在运行记录中保存版本号。
-
-## 11. Claude Code 研发目录
-
-Claude Code 的配置用于帮助开发者维护仓库，不能被线上 Agent Runtime 扫描：
-
-```text
-.claude/
-├── agents/
-│   ├── domain/
-│   │   ├── product-knowledge-reviewer.md
-│   │   └── tender-rules-reviewer.md
-│   ├── engineering/
-│   │   ├── architecture-reviewer.md
-│   │   └── test-reviewer.md
-│   └── research/
-│       └── document-parser-researcher.md
-├── skills/
-│   ├── add-domain-module/SKILL.md
-│   ├── add-agent-tool/SKILL.md
-│   ├── database-migration/SKILL.md
-│   └── run-architecture-check/SKILL.md
-├── rules/
-│   ├── architecture.md
-│   ├── testing.md
-│   ├── security.md
-│   └── python.md
-└── settings.json
-```
-
+``
 建议：
-
 - `AGENTS.md` 作为跨工具的唯一项目规则源。
-- 根 `CLAUDE.md` 使用 `@AGENTS.md` 导入，再写少量 Claude Code 专属说明。
 - 根规则保持短小；模块专属规则使用 path-scoped `.claude/rules/*.md`。
-- 多步骤、低频工作流写成 `.claude/skills/<name>/SKILL.md`，按需加载。
 - 子 Agent 只做边界清晰、权限受限的研究或审查；名称全仓唯一。
 - 不把全部业务文档塞入启动上下文，按路径、Skill 或工具按需读取。
 
@@ -374,7 +336,7 @@ backend/src/bid_system/
 
 ## 14. 建议的实施顺序
 
-1. 建立 `AGENTS.md`、`CLAUDE.md` 和架构依赖规则。
+1. 建立 `AGENTS.md`、和架构依赖规则。
 2. 创建 Python 工程、bootstrap、API/Worker 入口和统一测试配置。
 3. 实现 `documents`、`product_catalog`、`product_knowledge` 的最小纵向链路。
 4. 抽出 Agent Runtime 的最小能力：结构化输出、ToolResponse、ToolRegistry、上下文和 Trace。
@@ -383,10 +345,3 @@ backend/src/bid_system/
 7. 再实现招标抽取、确定性匹配、CP-SAT 方案生成和报告。
 8. 当模块确有独立扩缩容、发布或团队所有权需求时，再拆服务；保持 application port 和事件契约不变。
 
-## 15. 参考与取舍说明
-
-- [HelloAgents GitHub](https://github.com/jjyaoao/HelloAgents)：采用其核心/Agent/工具/上下文/技能/可观测性分层思想，不复制其教育型“万物皆工具”到业务领域模型。
-- [Hello-Agents 框架设计章节](https://github.com/datawhalechina/hello-agents/blob/main/docs/chapter7/Chapter7-Building-Your-Agent-Framework.md)：采用统一工具协议、注册机制和分层解耦。
-- [Claude Code 子 Agent 文档](https://code.claude.com/docs/en/sub-agents)：项目 Agent 放在 `.claude/agents/`，使用独立上下文与最小工具权限。
-- [Claude Code Skills 文档](https://code.claude.com/docs/en/skills)：项目 Skill 放在 `.claude/skills/<name>/SKILL.md` 并按需加载。
-- [Claude Code memory/rules 文档](https://code.claude.com/docs/en/memory)：根说明保持简洁，使用 `.claude/rules/` 做模块化和路径范围约束。
