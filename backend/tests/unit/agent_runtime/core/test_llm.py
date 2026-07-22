@@ -1,7 +1,7 @@
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from bid_system.agent_runtime.context.run import RunContext, RunIdentity, RuntimeVersions
+from bid_system.agent_runtime.core.agent import RunContext, RunIdentity, RuntimeVersions
 from bid_system.agent_runtime.core.llm import (
     MessageRole,
     ModelMessage,

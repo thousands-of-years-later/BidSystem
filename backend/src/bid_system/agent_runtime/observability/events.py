@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Protocol
 
-from bid_system.agent_runtime.context.run import RunContext
+from bid_system.agent_runtime.core.agent import RunContext
 from bid_system.agent_runtime.tools.response import ToolErrorCode
 
 

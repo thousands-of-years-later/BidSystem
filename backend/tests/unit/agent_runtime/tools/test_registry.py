@@ -3,7 +3,7 @@ from collections.abc import Callable
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from bid_system.agent_runtime.context.run import RunContext
+from bid_system.agent_runtime.core.agent import RunContext
 from bid_system.agent_runtime.tools.base import Tool, ToolSpec
 from bid_system.agent_runtime.tools.registry import (
     DuplicateToolError,

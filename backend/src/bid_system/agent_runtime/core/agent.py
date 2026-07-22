@@ -1,4 +1,4 @@
-"""Minimal immutable identity and version context for one runtime execution."""
+"""Agent execution identity, immutable run context, and version provenance."""
 
 from dataclasses import dataclass
 

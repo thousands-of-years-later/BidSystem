@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Protocol
 
-from bid_system.agent_runtime.context.run import RunContext
+from bid_system.agent_runtime.core.agent import RunContext
 
 
 class RuntimeTracer(Protocol):

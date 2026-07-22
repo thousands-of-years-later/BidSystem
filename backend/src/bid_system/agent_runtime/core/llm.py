@@ -6,7 +6,7 @@ from typing import Protocol, TypeVar
 
 from pydantic import BaseModel
 
-from bid_system.agent_runtime.context.run import RunContext
+from bid_system.agent_runtime.core.agent import RunContext
 
 OutputModelT = TypeVar("OutputModelT", bound=BaseModel)
 

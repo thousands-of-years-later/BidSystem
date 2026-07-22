@@ -6,7 +6,7 @@ from typing import Protocol, runtime_checkable
 
 from pydantic import BaseModel
 
-from bid_system.agent_runtime.context.run import RunContext
+from bid_system.agent_runtime.core.agent import RunContext
 from bid_system.agent_runtime.tools.response import ToolResponse
 
 TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")

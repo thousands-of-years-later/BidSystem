@@ -7,7 +7,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from opentelemetry import trace
 from opentelemetry.trace import Tracer
 
-from bid_system.agent_runtime.context.run import RunContext
+from bid_system.agent_runtime.core.agent import RunContext
 from bid_system.agent_runtime.observability.events import RuntimeEvent
 from bid_system.platform.telemetry.logging import LogChannel, get_logger
 

@@ -3,7 +3,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from bid_system.agent_runtime.context.run import (
+from bid_system.agent_runtime.core.agent import (
     RunContext,
     RunIdentity,
     RuntimeVersions,

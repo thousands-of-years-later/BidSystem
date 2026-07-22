@@ -7,7 +7,7 @@ from time import monotonic
 
 from pydantic import BaseModel
 
-from bid_system.agent_runtime.context.run import RunContext
+from bid_system.agent_runtime.core.agent import RunContext
 from bid_system.agent_runtime.observability.events import (
     NoOpRuntimeEventRecorder,
     RuntimeEvent,

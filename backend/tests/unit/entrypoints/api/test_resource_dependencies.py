@@ -1,4 +1,4 @@
-"""Unit tests for FastAPI dependency accessors."""
+"""Unit tests for HTTP resource dependency accessors."""
 
 from dataclasses import dataclass
 
@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from starlette.requests import Request
 
 from bid_system.bootstrap.container import ApplicationContainer
-from bid_system.bootstrap.dependencies import (
+from bid_system.entrypoints.api.dependencies import (
     get_container,
     get_database_resource,
     get_minio_resource,

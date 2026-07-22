@@ -1,0 +1,1 @@
+"""Deterministic context-truncation contracts."""

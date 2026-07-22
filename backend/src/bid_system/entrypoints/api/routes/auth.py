@@ -13,13 +13,13 @@ from starlette.responses import JSONResponse
 from bid_system.bootstrap.dependencies import (
     build_identity_authentication_repository,
     build_password_verifier,
-    get_redis_resource,
-    get_settings,
 )
 from bid_system.entrypoints.api.dependencies import (
     RequestContext,
     get_database_transaction,
+    get_redis_resource,
     get_request_context,
+    get_settings,
 )
 from bid_system.entrypoints.api.responses import error_response, success_response
 from bid_system.modules.identity.application.authenticate import (

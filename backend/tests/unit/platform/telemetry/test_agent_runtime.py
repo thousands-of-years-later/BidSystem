@@ -6,7 +6,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from bid_system.agent_runtime.context.run import (
+from bid_system.agent_runtime.core.agent import (
     RunContext,
     RunIdentity,
     RuntimeVersions,

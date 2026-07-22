@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from bid_system.agent_runtime.context.run import (
+from bid_system.agent_runtime.core.agent import (
     RunContext,
     RunIdentity,
     RuntimeVersions,

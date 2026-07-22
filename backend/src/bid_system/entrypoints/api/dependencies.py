@@ -7,17 +7,14 @@ from typing import Annotated, Protocol, runtime_checkable
 
 from fastapi import Depends, Request
 
-from bid_system.bootstrap.dependencies import (
-    build_identity_reader,
-    get_database_resource,
-    get_settings,
-)
+from bid_system.bootstrap.container import ApplicationContainer, LifecycleResource
+from bid_system.bootstrap.dependencies import build_identity_reader
 from bid_system.modules.identity.application.ports import IdentityReader
 from bid_system.modules.identity.application.resolve_identity import (
     ResolveIdentityHandler,
     ResolveIdentityQuery,
 )
-from bid_system.platform.config import AuthSettings
+from bid_system.platform.config import AppSettings, AuthSettings
 from bid_system.platform.database.transaction import AsyncTransactionManager
 from bid_system.platform.security.authentication import (
     AccessTokenVerifier,
@@ -26,6 +23,38 @@ from bid_system.platform.security.authentication import (
     TokenValidationError,
 )
 from bid_system.shared.contracts.errors import AuthenticationError
+
+
+def get_container(request: Request) -> ApplicationContainer:
+    """Return the application-scoped dependency container."""
+    container: ApplicationContainer = request.app.state.container
+    return container
+
+
+def get_settings(request: Request) -> AppSettings:
+    """Return validated settings through the application container."""
+    return get_container(request).settings
+
+
+def _required_resource(resource: LifecycleResource | None, name: str) -> LifecycleResource:
+    if resource is None:
+        raise RuntimeError(f"Application resource is not initialized: {name}")
+    return resource
+
+
+def get_database_resource(request: Request) -> LifecycleResource:
+    """Return the initialized database resource."""
+    return _required_resource(get_container(request).database, "database")
+
+
+def get_redis_resource(request: Request) -> LifecycleResource:
+    """Return the initialized Redis resource."""
+    return _required_resource(get_container(request).redis, "redis")
+
+
+def get_minio_resource(request: Request) -> LifecycleResource:
+    """Return the initialized MinIO resource."""
+    return _required_resource(get_container(request).minio, "minio")
 
 
 @runtime_checkable

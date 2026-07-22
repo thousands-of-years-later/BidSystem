@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from bid_system.agent_runtime.context.run import RunContext, RunIdentity, RuntimeVersions
+from bid_system.agent_runtime.core.agent import RunContext, RunIdentity, RuntimeVersions
 from bid_system.agent_runtime.observability.events import RuntimeEvent, RuntimeEventType
 from bid_system.agent_runtime.tools.base import ToolSpec
 from bid_system.agent_runtime.tools.executor import ToolExecutor
