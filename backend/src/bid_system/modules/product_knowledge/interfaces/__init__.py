@@ -1,0 +1,1 @@
+"""Product-knowledge protocol mappings."""

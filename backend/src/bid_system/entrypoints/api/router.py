@@ -3,7 +3,7 @@
 from fastapi import APIRouter
 from fastapi.routing import APIRoute
 
-from bid_system.entrypoints.api.routes import health, readiness, version
+from bid_system.entrypoints.api.routes import auth, health, readiness, version
 from bid_system.platform.config import ApiSettings
 
 
@@ -23,5 +23,6 @@ def create_root_router() -> APIRouter:
 def create_api_router(settings: ApiSettings) -> APIRouter:
     """Create the versioned public API router."""
     router = APIRouter(prefix=settings.prefix)
+    router.include_router(auth.router, tags=["authentication"])
     router.include_router(version.router, tags=["metadata"])
     return router

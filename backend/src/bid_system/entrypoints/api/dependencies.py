@@ -1,14 +1,31 @@
 """Typed request-scoped dependency accessors."""
 
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Protocol, runtime_checkable
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
+from typing import Annotated, Protocol, runtime_checkable
 
-from fastapi import Request
+from fastapi import Depends, Request
 
-from bid_system.bootstrap.dependencies import get_database_resource
+from bid_system.bootstrap.dependencies import (
+    build_identity_reader,
+    get_database_resource,
+    get_settings,
+)
+from bid_system.modules.identity.application.ports import IdentityReader
+from bid_system.modules.identity.application.resolve_identity import (
+    ResolveIdentityHandler,
+    ResolveIdentityQuery,
+)
+from bid_system.platform.config import AuthSettings
 from bid_system.platform.database.transaction import AsyncTransactionManager
+from bid_system.platform.security.authentication import (
+    AccessTokenVerifier,
+    AuthenticatedPrincipal,
+    BearerTokenParser,
+    TokenValidationError,
+)
+from bid_system.shared.contracts.errors import AuthenticationError
 
 
 @runtime_checkable
@@ -45,3 +62,55 @@ async def get_database_transaction(request: Request) -> AsyncGenerator[AsyncTran
         raise RuntimeError("Initialized database resource cannot create transactions")
     async with resource.transaction() as transaction:
         yield transaction
+
+
+async def resolve_current_principal(
+    *,
+    authorization_header: str | None,
+    auth_settings: AuthSettings,
+    identity_reader: IdentityReader,
+    resolved_at: datetime,
+) -> AuthenticatedPrincipal:
+    """Resolve a bearer credential against cryptography and current identity state."""
+    try:
+        token = BearerTokenParser.parse(authorization_header)
+        claims = AccessTokenVerifier(auth_settings).verify(token, verified_at=resolved_at)
+    except TokenValidationError:
+        raise AuthenticationError from None
+    identity = await ResolveIdentityHandler(identity_reader).handle(
+        ResolveIdentityQuery(
+            user_id=claims.subject,
+            tenant_id=claims.tenant_id,
+            session_id=claims.session_id,
+            resolved_at=resolved_at,
+        )
+    )
+    return AuthenticatedPrincipal(
+        user_id=identity.user_id,
+        tenant_id=identity.tenant_id,
+        session_id=identity.session_id,
+        roles=identity.roles,
+        permissions=identity.permissions,
+        active=True,
+    )
+
+
+async def get_current_principal(
+    request: Request,
+    transaction: Annotated[AsyncTransactionManager, Depends(get_database_transaction)],
+) -> AuthenticatedPrincipal:
+    """FastAPI dependency that stores only verified identity in request context."""
+    principal = await resolve_current_principal(
+        authorization_header=request.headers.get("Authorization"),
+        auth_settings=get_settings(request).auth,
+        identity_reader=build_identity_reader(transaction),
+        resolved_at=datetime.now(UTC),
+    )
+    context = get_request_context(request)
+    request.state.request_context = replace(
+        context,
+        user_id=principal.user_id,
+        tenant_id=principal.tenant_id,
+    )
+    request.state.current_principal = principal
+    return principal

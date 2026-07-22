@@ -24,7 +24,6 @@
 ```text
 bid-system/
 ├── AGENTS.md                         # 跨编码 Agent 的项目事实与硬约束，精简
-├── PROJECT_MEMORY.md                 # 当前产品与业务设计基线
 ├── pyproject.toml                    # 后端工作区、统一 lint/test 配置
 ├── package.json                      # 仅在前端/工作区需要时添加
 │
@@ -56,6 +55,8 @@ bid-system/
 ├── deploy/                           # Docker/Compose/K8s/监控配置
 ├── scripts/                          # 本地开发、导入和运维脚本
 ├── docs/
+│   ├── PROJECT_MEMORY.md             # 当前产品与业务设计基线
+│   ├── module-layout.md              # 模块、目录和依赖方向基线
 │   ├── architecture/
 │   ├── adr/                          # Architecture Decision Records
 │   ├── domain/
@@ -65,6 +66,7 @@ bid-system/
 
 ```text
 backend/src/bid_system/modules/
+├── identity/           # 本地账号、租户成员关系、角色授权与刷新会话
 ├── documents/          # 文件版本、DocumentIR、解析任务、块与定位信息
 ├── product_catalog/    # ProductFamily/Model/Line/Alias 与主数据
 ├── product_knowledge/  # Evidence、FactCandidate、ProductFact、Relation、冲突
@@ -79,6 +81,7 @@ backend/src/bid_system/modules/
 
 | 模块                  | 拥有的核心事实                     | 不负责          |
 | ------------------- | --------------------------- | ------------ |
+| `identity`          | 本地账号、租户成员关系、角色授权、刷新会话       | 业务资源自身的权限规则与技术加密实现 |
 | `documents`         | 原文件版本、解析状态、DocumentIR、文档块坐标 | 产品事实、招标需求发布  |
 | `product_catalog`   | 型号身份、别名、产品线归属、生命周期          | 从文档推断技术参数    |
 | `product_knowledge` | 证据、候选事实、正式事实、产品关系、冲突        | 招标侧要求与组合求解   |
@@ -92,7 +95,7 @@ backend/src/bid_system/modules/
 
 ## 4. 每个领域模块的内部结构
 
-所有业务模块使用相同模板，但只创建实际需要的文件：
+所有业务模块使用相同目录骨架。目录和 Python 包边界预先保留，实体、规则、端口和适配器文件仍按实际用例逐步增加：
 
 ```text
 modules/product_knowledge/
@@ -279,7 +282,9 @@ prompts/
 ```
 
 Skill 存放较稳定、按需加载的领域知识；Prompt 存放某个模型调用的明确指令和输出 schema。二者都必须版本化，并在运行记录中保存版本号。
-``
+
+## 11. 研发 Agent 配置建议
+
 建议：
 - `AGENTS.md` 作为跨工具的唯一项目规则源。
 - 根规则保持短小；模块专属规则使用 path-scoped `.claude/rules/*.md`。
@@ -312,27 +317,13 @@ platform adapters ──────implements ports───┘
 - API 路由内编写抽取、匹配或求解规则。
 - 为复用 ORM 模型而共享领域实体。
 
-## 13. 首期最小落地目录
+## 13. 目录骨架落地策略
 
-不要一次创建所有空文件。第一阶段只落地：
+- 本文列出的顶层目录、业务模块、模块内部分层、Agent Runtime 分组、业务编排分组和测试分层应完整创建。
+- Python 包目录使用 `__init__.py` 保持构建与导入行为一致；每个业务模块保留 `public.py` 作为同步公开门面。
+- 暂无内容的非 Python 目录使用 `.gitkeep` 纳入版本控制；占位目录不得提前承载未确认的业务规则、数据表或外部接口。
+- 新增实际实现时仍遵循最小纵向切片，并删除已经失效的占位说明或文件。
 
-```text
-backend/src/bid_system/
-├── bootstrap/
-├── entrypoints/api/
-├── entrypoints/worker/
-├── shared/kernel/
-├── platform/{database,object_store,llm,queue}/
-├── agent_runtime/{core,tools,context,observability}/
-├── orchestration/{agents,tools,workflows}/
-└── modules/
-    ├── documents/
-    ├── product_catalog/
-    ├── product_knowledge/
-    └── reviews/
-```
-
-第二阶段增加 `tenders` 与 `matching`，第三阶段增加 `planning` 与 `reporting`。这样每个新增目录都对应已运行的用例，而不是预先制造空抽象。
 
 ## 14. 建议的实施顺序
 
@@ -344,4 +335,3 @@ backend/src/bid_system/
 6. 增加 `reviews` 发布门禁和完整审计。
 7. 再实现招标抽取、确定性匹配、CP-SAT 方案生成和报告。
 8. 当模块确有独立扩缩容、发布或团队所有权需求时，再拆服务；保持 application port 和事件契约不变。
-

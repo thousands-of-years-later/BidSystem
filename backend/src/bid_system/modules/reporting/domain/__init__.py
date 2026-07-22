@@ -1,0 +1,1 @@
+"""Pure reporting-domain model."""

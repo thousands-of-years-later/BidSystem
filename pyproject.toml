@@ -10,14 +10,25 @@ readme = "backend/README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "alembic>=1.14,<2",
+    "celery[redis]>=5.6,<6",
     "fastapi>=0.115,<1",
     "httpx>=0.28,<1",
     "minio>=7.2,<8",
+    "pwdlib[argon2]>=0.3,<1",
+    "pyjwt[crypto]>=2.10,<3",
+    "opentelemetry-api>=1.30,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.30,<2",
+    "opentelemetry-sdk>=1.30,<2",
     "psycopg[binary]>=3.2,<4",
     "pydantic-settings>=2.7,<3",
     "redis>=5,<7",
     "sqlalchemy[asyncio]>=2.0,<3",
+    "uvicorn[standard]>=0.34,<1",
 ]
+
+[project.scripts]
+bid-system-worker = "bid_system.entrypoints.worker.app:main"
+bid-system-worker-health = "bid_system.entrypoints.worker.app:healthcheck"
 
 [project.optional-dependencies]
 dev = [
@@ -82,7 +93,7 @@ exclude_also = [
 python_version = "3.13"
 strict = true
 plugins = ["pydantic.mypy"]
-mypy_path = "backend/src"
+mypy_path = ["backend/src", "backend/typings"]
 files = ["backend/src", "backend/tests"]
 pretty = true
 show_error_codes = true

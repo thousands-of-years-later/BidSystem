@@ -1,0 +1,1 @@
+"""Pure tender-domain model."""

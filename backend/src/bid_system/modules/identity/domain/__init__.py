@@ -1,0 +1,2 @@
+"""Pure identity domain models."""
+

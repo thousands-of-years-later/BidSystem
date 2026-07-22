@@ -93,3 +93,13 @@ def test_readiness_returns_503_without_leaking_dependency_error() -> None:
         "request_id": response.headers["X-Request-ID"],
     }
     assert "unavailable" not in response.text
+
+
+def test_authentication_routes_are_exposed_under_versioned_api() -> None:
+    app = create_app(settings=make_settings(), container_factory=FakeContainer)
+
+    paths = app.openapi()["paths"]
+
+    assert "/api/v1/auth/login" in paths
+    assert "/api/v1/auth/refresh" in paths
+    assert "/api/v1/auth/logout" in paths

@@ -20,6 +20,12 @@ DEFAULT_OCR_MAX_CONCURRENCY = 4
 DEFAULT_STARTUP_CONNECT_TIMEOUT_SECONDS = 10.0
 DEFAULT_SHUTDOWN_TIMEOUT_SECONDS = 10.0
 DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 900
+DEFAULT_REFRESH_TOKEN_ABSOLUTE_TTL_SECONDS = 30 * 24 * 60 * 60
+DEFAULT_REFRESH_TOKEN_IDLE_TTL_SECONDS = 7 * 24 * 60 * 60
+DEFAULT_ARGON2_MEMORY_COST_KIB = 19_456
+DEFAULT_ARGON2_TIME_COST = 2
+DEFAULT_ARGON2_PARALLELISM = 1
+SUPPORTED_JWT_ALGORITHM = "RS256"
 DEFAULT_GZIP_MINIMUM_SIZE_BYTES = 1024
 DEFAULT_MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024
 DEFAULT_READINESS_TIMEOUT_SECONDS = 3.0
@@ -28,6 +34,16 @@ DEFAULT_API_DESCRIPTION = "HTTP API for the bid agent platform."
 DEFAULT_API_PREFIX = "/api/v1"
 DEFAULT_TRUSTED_HOSTS = ("localhost", "testserver")
 DEFAULT_TRACE_SERVICE_NAME = "bid-system"
+DEFAULT_METRIC_EXPORT_INTERVAL_SECONDS = 60.0
+DEFAULT_WORKER_QUEUE_NAME = "bid-system"
+DEFAULT_WORKER_CONCURRENCY = 2
+DEFAULT_WORKER_SOFT_TIME_LIMIT_SECONDS = 300
+DEFAULT_WORKER_HARD_TIME_LIMIT_SECONDS = 330
+DEFAULT_WORKER_VISIBILITY_TIMEOUT_SECONDS = 3_600
+DEFAULT_WORKER_MAX_RETRIES = 3
+DEFAULT_WORKER_RETRY_BASE_DELAY_SECONDS = 5
+DEFAULT_WORKER_RETRY_MAX_DELAY_SECONDS = 300
+DEFAULT_WORKER_PREFETCH_MULTIPLIER = 1
 SUPPORTED_LOG_LEVELS = frozenset({"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"})
 DEVELOPMENT_CREDENTIALS = frozenset({"bid_system_dev", "bid_system_dev_secret"})
 
@@ -141,17 +157,72 @@ class TracingSettings(BaseModel):
     otlp_endpoint: str | None
 
 
+class MetricsSettings(BaseModel):
+    """Metric metadata and periodic OTLP export settings."""
+
+    model_config = {"frozen": True}
+
+    enabled: bool
+    service_name: str = Field(min_length=1)
+    otlp_endpoint: str | None
+    export_interval_seconds: float = Field(gt=0)
+
+
+class WorkerSettings(BaseModel):
+    """Validated Celery worker delivery and execution policy."""
+
+    model_config = {"frozen": True}
+
+    queue_name: str = Field(min_length=1, pattern=r"^[A-Za-z0-9._-]+$")
+    concurrency: int = Field(ge=1)
+    soft_time_limit_seconds: int = Field(ge=1)
+    hard_time_limit_seconds: int = Field(ge=1)
+    visibility_timeout_seconds: int = Field(ge=1)
+    max_retries: int = Field(ge=0)
+    retry_base_delay_seconds: int = Field(ge=1)
+    retry_max_delay_seconds: int = Field(ge=1)
+    prefetch_multiplier: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def validate_delivery_windows(self) -> Self:
+        """Keep broker redelivery outside the configured task execution window."""
+        if self.hard_time_limit_seconds <= self.soft_time_limit_seconds:
+            raise ValueError("WORKER_HARD_TIME_LIMIT_SECONDS must exceed the soft limit")
+        if self.visibility_timeout_seconds <= self.hard_time_limit_seconds:
+            raise ValueError("WORKER_VISIBILITY_TIMEOUT_SECONDS must exceed the hard limit")
+        if self.retry_max_delay_seconds < self.retry_base_delay_seconds:
+            raise ValueError("WORKER_RETRY_MAX_DELAY_SECONDS must be >= the base delay")
+        return self
+
+
+class JwtVerificationKeySettings(BaseModel):
+    """One public JWT verification key addressable by its immutable key id."""
+
+    model_config = {"frozen": True}
+
+    key_id: str = Field(min_length=1)
+    public_key: SecretStr
+
+
 class AuthSettings(BaseModel):
-    """JWT verification/signing configuration exposed to a future auth adapter."""
+    """Validated authentication cryptography and session policy."""
 
     model_config = {"frozen": True}
 
     enabled: bool
     algorithm: str | None
-    signing_key: SecretStr | None
+    active_key_id: str | None
+    signing_private_key: SecretStr | None
+    verification_keys: tuple[JwtVerificationKeySettings, ...]
     issuer: str | None
     audience: str | None
     access_token_ttl_seconds: int = Field(ge=1)
+    refresh_token_absolute_ttl_seconds: int = Field(ge=1)
+    refresh_token_idle_ttl_seconds: int = Field(ge=1)
+    refresh_cookie_secure: bool
+    argon2_memory_cost_kib: int = Field(ge=DEFAULT_ARGON2_MEMORY_COST_KIB)
+    argon2_time_cost: int = Field(ge=DEFAULT_ARGON2_TIME_COST)
+    argon2_parallelism: int = Field(ge=DEFAULT_ARGON2_PARALLELISM)
 
 
 class ApiSettings(BaseModel):
@@ -301,15 +372,99 @@ class AppSettings(BaseSettings):
         default=None,
         validation_alias="TRACING_OTLP_ENDPOINT",
     )
+    metrics_enabled: bool = Field(default=False, validation_alias="METRICS_ENABLED")
+    metrics_export_interval_seconds: float = Field(
+        default=DEFAULT_METRIC_EXPORT_INTERVAL_SECONDS,
+        gt=0,
+        validation_alias="METRICS_EXPORT_INTERVAL_SECONDS",
+    )
+    worker_queue_name: str = Field(
+        default=DEFAULT_WORKER_QUEUE_NAME,
+        validation_alias="WORKER_QUEUE_NAME",
+    )
+    worker_concurrency: int = Field(
+        default=DEFAULT_WORKER_CONCURRENCY,
+        ge=1,
+        validation_alias="WORKER_CONCURRENCY",
+    )
+    worker_soft_time_limit_seconds: int = Field(
+        default=DEFAULT_WORKER_SOFT_TIME_LIMIT_SECONDS,
+        ge=1,
+        validation_alias="WORKER_SOFT_TIME_LIMIT_SECONDS",
+    )
+    worker_hard_time_limit_seconds: int = Field(
+        default=DEFAULT_WORKER_HARD_TIME_LIMIT_SECONDS,
+        ge=1,
+        validation_alias="WORKER_HARD_TIME_LIMIT_SECONDS",
+    )
+    worker_visibility_timeout_seconds: int = Field(
+        default=DEFAULT_WORKER_VISIBILITY_TIMEOUT_SECONDS,
+        ge=1,
+        validation_alias="WORKER_VISIBILITY_TIMEOUT_SECONDS",
+    )
+    worker_max_retries: int = Field(
+        default=DEFAULT_WORKER_MAX_RETRIES,
+        ge=0,
+        validation_alias="WORKER_MAX_RETRIES",
+    )
+    worker_retry_base_delay_seconds: int = Field(
+        default=DEFAULT_WORKER_RETRY_BASE_DELAY_SECONDS,
+        ge=1,
+        validation_alias="WORKER_RETRY_BASE_DELAY_SECONDS",
+    )
+    worker_retry_max_delay_seconds: int = Field(
+        default=DEFAULT_WORKER_RETRY_MAX_DELAY_SECONDS,
+        ge=1,
+        validation_alias="WORKER_RETRY_MAX_DELAY_SECONDS",
+    )
+    worker_prefetch_multiplier: int = Field(
+        default=DEFAULT_WORKER_PREFETCH_MULTIPLIER,
+        ge=1,
+        validation_alias="WORKER_PREFETCH_MULTIPLIER",
+    )
     auth_enabled: bool = Field(default=False, validation_alias="AUTH_ENABLED")
     jwt_algorithm: str | None = Field(default=None, validation_alias="JWT_ALGORITHM")
-    jwt_signing_key: SecretStr | None = Field(default=None, validation_alias="JWT_SIGNING_KEY")
+    jwt_active_key_id: str | None = Field(default=None, validation_alias="JWT_ACTIVE_KEY_ID")
+    jwt_signing_private_key: SecretStr | None = Field(
+        default=None,
+        validation_alias="JWT_SIGNING_PRIVATE_KEY",
+    )
+    jwt_verification_keys: tuple[JwtVerificationKeySettings, ...] = Field(
+        default=(),
+        validation_alias="JWT_VERIFICATION_KEYS",
+    )
     jwt_issuer: str | None = Field(default=None, validation_alias="JWT_ISSUER")
     jwt_audience: str | None = Field(default=None, validation_alias="JWT_AUDIENCE")
     jwt_access_token_ttl_seconds: int = Field(
         default=DEFAULT_ACCESS_TOKEN_TTL_SECONDS,
         ge=1,
         validation_alias="JWT_ACCESS_TOKEN_TTL_SECONDS",
+    )
+    refresh_token_absolute_ttl_seconds: int = Field(
+        default=DEFAULT_REFRESH_TOKEN_ABSOLUTE_TTL_SECONDS,
+        ge=1,
+        validation_alias="REFRESH_TOKEN_ABSOLUTE_TTL_SECONDS",
+    )
+    refresh_token_idle_ttl_seconds: int = Field(
+        default=DEFAULT_REFRESH_TOKEN_IDLE_TTL_SECONDS,
+        ge=1,
+        validation_alias="REFRESH_TOKEN_IDLE_TTL_SECONDS",
+    )
+    refresh_cookie_secure: bool = Field(default=True, validation_alias="REFRESH_COOKIE_SECURE")
+    argon2_memory_cost_kib: int = Field(
+        default=DEFAULT_ARGON2_MEMORY_COST_KIB,
+        ge=DEFAULT_ARGON2_MEMORY_COST_KIB,
+        validation_alias="ARGON2_MEMORY_COST_KIB",
+    )
+    argon2_time_cost: int = Field(
+        default=DEFAULT_ARGON2_TIME_COST,
+        ge=DEFAULT_ARGON2_TIME_COST,
+        validation_alias="ARGON2_TIME_COST",
+    )
+    argon2_parallelism: int = Field(
+        default=DEFAULT_ARGON2_PARALLELISM,
+        ge=DEFAULT_ARGON2_PARALLELISM,
+        validation_alias="ARGON2_PARALLELISM",
     )
     api_title: str = Field(default=DEFAULT_API_TITLE, validation_alias="API_TITLE")
     api_description: str = Field(
@@ -370,18 +525,33 @@ class AppSettings(BaseSettings):
         self._validate_provider(
             "OCR", self.ocr_enabled, self.ocr_base_url, self.ocr_api_key, self.ocr_model
         )
+        if self.refresh_token_idle_ttl_seconds > self.refresh_token_absolute_ttl_seconds:
+            raise ValueError(
+                "REFRESH_TOKEN_IDLE_TTL_SECONDS must be <= "
+                "REFRESH_TOKEN_ABSOLUTE_TTL_SECONDS"
+            )
         if self.auth_enabled and not all(
             (
                 self.jwt_algorithm,
-                self._secret_value(self.jwt_signing_key),
+                self.jwt_active_key_id,
+                self._secret_value(self.jwt_signing_private_key),
+                self.jwt_verification_keys,
                 self.jwt_issuer,
                 self.jwt_audience,
             )
         ):
             raise ValueError(
-                "JWT_ALGORITHM, JWT_SIGNING_KEY, JWT_ISSUER and JWT_AUDIENCE are required "
-                "when AUTH_ENABLED=true"
+                "JWT_ALGORITHM, JWT_ACTIVE_KEY_ID, JWT_SIGNING_PRIVATE_KEY, "
+                "JWT_VERIFICATION_KEYS, JWT_ISSUER and JWT_AUDIENCE are required when "
+                "AUTH_ENABLED=true"
             )
+        if self.auth_enabled and self.jwt_algorithm != SUPPORTED_JWT_ALGORITHM:
+            raise ValueError(f"JWT_ALGORITHM must be {SUPPORTED_JWT_ALGORITHM}")
+        verification_key_ids = {key.key_id for key in self.jwt_verification_keys}
+        if len(verification_key_ids) != len(self.jwt_verification_keys):
+            raise ValueError("JWT_VERIFICATION_KEYS key ids must be unique")
+        if self.auth_enabled and self.jwt_active_key_id not in verification_key_ids:
+            raise ValueError("JWT_ACTIVE_KEY_ID must exist in JWT_VERIFICATION_KEYS")
         RuntimeLimitsSettings(
             http_timeout_seconds=self.http_timeout_seconds,
             retry_max_attempts=self.retry_max_attempts,
@@ -390,8 +560,20 @@ class AppSettings(BaseSettings):
             llm_max_concurrency=self.llm_max_concurrency,
             ocr_max_concurrency=self.ocr_max_concurrency,
         )
+        _ = self.worker
+        if (self.tracing_enabled or self.metrics_enabled) and not self.tracing_otlp_endpoint:
+            raise ValueError(
+                "TRACING_OTLP_ENDPOINT is required when tracing or metrics export is enabled"
+            )
+        if self.tracing_otlp_endpoint and urlsplit(self.tracing_otlp_endpoint).scheme not in {
+            "http",
+            "https",
+        }:
+            raise ValueError("TRACING_OTLP_ENDPOINT must use http:// or https://")
         _ = self.api
         if self.environment is Environment.PROD:
+            if not self.refresh_cookie_secure:
+                raise ValueError("REFRESH_COOKIE_SECURE must be true in production")
             minio_secrets = {
                 self.minio_access_key.get_secret_value(),
                 self.minio_secret_key.get_secret_value(),
@@ -494,14 +676,45 @@ class AppSettings(BaseSettings):
         )
 
     @property
+    def metrics(self) -> MetricsSettings:
+        return MetricsSettings(
+            enabled=self.metrics_enabled,
+            service_name=self.tracing_service_name,
+            otlp_endpoint=self.tracing_otlp_endpoint,
+            export_interval_seconds=self.metrics_export_interval_seconds,
+        )
+
+    @property
+    def worker(self) -> WorkerSettings:
+        return WorkerSettings(
+            queue_name=self.worker_queue_name,
+            concurrency=self.worker_concurrency,
+            soft_time_limit_seconds=self.worker_soft_time_limit_seconds,
+            hard_time_limit_seconds=self.worker_hard_time_limit_seconds,
+            visibility_timeout_seconds=self.worker_visibility_timeout_seconds,
+            max_retries=self.worker_max_retries,
+            retry_base_delay_seconds=self.worker_retry_base_delay_seconds,
+            retry_max_delay_seconds=self.worker_retry_max_delay_seconds,
+            prefetch_multiplier=self.worker_prefetch_multiplier,
+        )
+
+    @property
     def auth(self) -> AuthSettings:
         return AuthSettings(
             enabled=self.auth_enabled,
             algorithm=self.jwt_algorithm,
-            signing_key=self.jwt_signing_key,
+            active_key_id=self.jwt_active_key_id,
+            signing_private_key=self.jwt_signing_private_key,
+            verification_keys=self.jwt_verification_keys,
             issuer=self.jwt_issuer,
             audience=self.jwt_audience,
             access_token_ttl_seconds=self.jwt_access_token_ttl_seconds,
+            refresh_token_absolute_ttl_seconds=self.refresh_token_absolute_ttl_seconds,
+            refresh_token_idle_ttl_seconds=self.refresh_token_idle_ttl_seconds,
+            refresh_cookie_secure=self.refresh_cookie_secure,
+            argon2_memory_cost_kib=self.argon2_memory_cost_kib,
+            argon2_time_cost=self.argon2_time_cost,
+            argon2_parallelism=self.argon2_parallelism,
         )
 
     @property

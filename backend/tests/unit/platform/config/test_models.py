@@ -8,12 +8,26 @@ from bid_system.platform.config.models import (
     AppSettings,
     AuthSettings,
     Environment,
+    JwtVerificationKeySettings,
     RuntimeLimitsSettings,
 )
 
+TEST_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\ntest-private-key\n-----END PRIVATE KEY-----"
+TEST_PUBLIC_KEY = "-----BEGIN PUBLIC KEY-----\ntest-public-key\n-----END PUBLIC KEY-----"
+type SettingOverride = str | tuple[JwtVerificationKeySettings, ...]
 
-def _settings(**overrides: str) -> AppSettings:
-    values = {
+
+def _verification_keys() -> tuple[JwtVerificationKeySettings, ...]:
+    return (
+        JwtVerificationKeySettings(
+            key_id="test-key-1",
+            public_key=SecretStr(TEST_PUBLIC_KEY),
+        ),
+    )
+
+
+def _settings(**overrides: SettingOverride) -> AppSettings:
+    values: dict[str, SettingOverride] = {
         "APP_ENV": "test",
         "DATABASE_URL": "postgresql+psycopg://user:password@localhost:5432/bid_system",
         "REDIS_URL": "redis://localhost:6379/0",
@@ -46,20 +60,74 @@ def test_enabled_auth_requires_complete_jwt_configuration() -> None:
 def test_enabled_auth_accepts_complete_configuration() -> None:
     settings = _settings(
         AUTH_ENABLED="true",
-        JWT_ALGORITHM="HS256",
-        JWT_SIGNING_KEY="a-test-only-signing-key",
+        JWT_ALGORITHM="RS256",
+        JWT_ACTIVE_KEY_ID="test-key-1",
+        JWT_SIGNING_PRIVATE_KEY=TEST_PRIVATE_KEY,
+        JWT_VERIFICATION_KEYS=_verification_keys(),
         JWT_ISSUER="bid-system",
         JWT_AUDIENCE="bid-system-api",
     )
 
     assert settings.auth == AuthSettings(
         enabled=True,
-        algorithm="HS256",
-        signing_key=SecretStr("a-test-only-signing-key"),
+        algorithm="RS256",
+        active_key_id="test-key-1",
+        signing_private_key=SecretStr(TEST_PRIVATE_KEY),
+        verification_keys=(
+            JwtVerificationKeySettings(
+                key_id="test-key-1",
+                public_key=SecretStr(TEST_PUBLIC_KEY),
+            ),
+        ),
         issuer="bid-system",
         audience="bid-system-api",
         access_token_ttl_seconds=900,
+        refresh_token_absolute_ttl_seconds=2_592_000,
+        refresh_token_idle_ttl_seconds=604_800,
+        refresh_cookie_secure=True,
+        argon2_memory_cost_kib=19_456,
+        argon2_time_cost=2,
+        argon2_parallelism=1,
     )
+
+
+def test_enabled_auth_rejects_symmetric_jwt_algorithm() -> None:
+    with pytest.raises(ValidationError, match="RS256"):
+        _settings(
+            AUTH_ENABLED="true",
+            JWT_ALGORITHM="HS256",
+            JWT_ACTIVE_KEY_ID="test-key-1",
+            JWT_SIGNING_PRIVATE_KEY=TEST_PRIVATE_KEY,
+            JWT_VERIFICATION_KEYS=_verification_keys(),
+            JWT_ISSUER="bid-system",
+            JWT_AUDIENCE="bid-system-api",
+        )
+
+
+def test_enabled_auth_requires_active_key_in_verification_key_ring() -> None:
+    with pytest.raises(ValidationError, match="JWT_ACTIVE_KEY_ID"):
+        _settings(
+            AUTH_ENABLED="true",
+            JWT_ALGORITHM="RS256",
+            JWT_ACTIVE_KEY_ID="missing-key",
+            JWT_SIGNING_PRIVATE_KEY=TEST_PRIVATE_KEY,
+            JWT_VERIFICATION_KEYS=_verification_keys(),
+            JWT_ISSUER="bid-system",
+            JWT_AUDIENCE="bid-system-api",
+        )
+
+
+def test_rejects_refresh_idle_ttl_longer_than_absolute_ttl() -> None:
+    with pytest.raises(ValidationError, match="REFRESH_TOKEN_IDLE_TTL_SECONDS"):
+        _settings(
+            REFRESH_TOKEN_ABSOLUTE_TTL_SECONDS="3600",
+            REFRESH_TOKEN_IDLE_TTL_SECONDS="7200",
+        )
+
+
+def test_production_rejects_insecure_refresh_cookie() -> None:
+    with pytest.raises(ValidationError, match="REFRESH_COOKIE_SECURE"):
+        _settings(APP_ENV="prod", REFRESH_COOKIE_SECURE="false")
 
 
 @pytest.mark.parametrize(

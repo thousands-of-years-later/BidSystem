@@ -1,5 +1,7 @@
 """SQLAlchemy async engine lifecycle adapter."""
 
+from typing import Protocol, runtime_checkable
+
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -11,6 +13,20 @@ from bid_system.platform.config import DatabaseSettings
 from bid_system.platform.database.health import probe_database
 from bid_system.platform.database.session import create_session_factory
 from bid_system.platform.database.transaction import AsyncTransactionManager
+from bid_system.platform.telemetry.metrics import DatabasePoolMeasurement, get_metrics_sink
+
+PRIMARY_POOL_NAME = "primary"
+
+
+@runtime_checkable
+class PoolMetricsSource(Protocol):
+    """Queue-pool state exposed by SQLAlchemy without leaking the concrete pool type."""
+
+    def size(self) -> int: ...
+
+    def checkedout(self) -> int: ...
+
+    def overflow(self) -> int: ...
 
 
 class DatabaseResource:
@@ -31,10 +47,25 @@ class DatabaseResource:
     async def probe(self) -> None:
         """Fail startup unless PostgreSQL accepts a simple query."""
         await probe_database(self.engine)
+        self.observe_pool()
 
     def transaction(self) -> AsyncTransactionManager:
         """Create an operation-scoped transaction for bootstrap injection."""
-        return AsyncTransactionManager(self.session_factory)
+        return AsyncTransactionManager(self.session_factory, self.observe_pool)
+
+    def observe_pool(self) -> None:
+        """Publish a low-cardinality snapshot after lifecycle and transaction events."""
+        pool = self.engine.pool
+        if not isinstance(pool, PoolMetricsSource):
+            return
+        get_metrics_sink().observe_database_pool(
+            DatabasePoolMeasurement(
+                pool_name=PRIMARY_POOL_NAME,
+                size=pool.size(),
+                checked_out=pool.checkedout(),
+                overflow=pool.overflow(),
+            )
+        )
 
     async def close(self) -> None:
         """Dispose the engine and all pooled connections."""

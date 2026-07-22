@@ -1,0 +1,156 @@
+name: bid-system
+
+services:
+  api:
+    image: bid-system-backend:local
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql+psycopg://bid_system:bid_system_dev@postgres:5432/bid_system}
+      REDIS_URL: ${REDIS_URL_DOCKER:-redis://redis:6379/0}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT_DOCKER:-minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-bid_system}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-bid_system_dev_secret}
+      MINIO_BUCKET: ${MINIO_BUCKET:-bid-system}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  worker:
+    image: bid-system-backend:local
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    restart: unless-stopped
+    command:
+      - bid-system-worker
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql+psycopg://bid_system:bid_system_dev@postgres:5432/bid_system}
+      REDIS_URL: ${REDIS_URL_DOCKER:-redis://redis:6379/0}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT_DOCKER:-minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-bid_system}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-bid_system_dev_secret}
+      MINIO_BUCKET: ${MINIO_BUCKET:-bid-system}
+      WORKER_QUEUE_NAME: ${WORKER_QUEUE_NAME:-bid-system}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    stop_grace_period: ${WORKER_STOP_GRACE_PERIOD:-6m}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          bid-system-worker-health &&
+          celery -A bid_system.entrypoints.worker.app:celery_app inspect ping
+          --destination "worker@$${HOSTNAME}" --timeout 5
+      interval: 15s
+      timeout: 10s
+      retries: 4
+      start_period: 20s
+
+  postgres:
+    image: pgvector/pgvector:0.8.5-pg16-trixie
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-bid_system}
+      POSTGRES_USER: ${POSTGRES_USER:-bid_system}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bid_system_dev}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-bid_system}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-bid_system_dev_secret}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test:
+        - CMD
+        - mc
+        - ready
+        - local
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  minio-init:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-bid_system}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-bid_system_dev_secret}
+      MINIO_BUCKET: ${MINIO_BUCKET:-bid-system}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" &&
+        mc mb --ignore-existing "local/$${MINIO_BUCKET}"
+
+volumes:
+  postgres_data:
+  minio_data:

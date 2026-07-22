@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from bid_system.platform.database.models import OrmBase
 from bid_system.platform.database.outbox import OutboxEventModel
+from bid_system.platform.database.task_execution import TaskExecutionModel
 
 DATABASE_URL_ENV = "DATABASE_URL"
 
@@ -22,7 +23,7 @@ if config.config_file_name is not None:
 
 # WHY: importing each infrastructure model is the explicit migration registry; domain modules
 # remain independent of SQLAlchemy and no database connection is opened during import.
-registered_models = (OutboxEventModel,)
+registered_models = (OutboxEventModel, TaskExecutionModel)
 target_metadata = OrmBase.metadata
 
 

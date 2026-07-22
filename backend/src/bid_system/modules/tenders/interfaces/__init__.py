@@ -1,0 +1,1 @@
+"""Tender protocol mappings."""

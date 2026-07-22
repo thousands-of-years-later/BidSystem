@@ -7,13 +7,16 @@ from bid_system.platform.config.models import (
     AuthSettings,
     DatabaseSettings,
     Environment,
+    JwtVerificationKeySettings,
     LoggingSettings,
+    MetricsSettings,
     MinioSettings,
     ProviderSettings,
     RedisSettings,
     RuntimeLimitsSettings,
     StartupSettings,
     TracingSettings,
+    WorkerSettings,
 )
 
 __all__ = (
@@ -23,12 +26,15 @@ __all__ = (
     "ConfigurationLoadError",
     "DatabaseSettings",
     "Environment",
+    "JwtVerificationKeySettings",
     "LoggingSettings",
+    "MetricsSettings",
     "MinioSettings",
     "ProviderSettings",
     "RedisSettings",
     "RuntimeLimitsSettings",
     "StartupSettings",
     "TracingSettings",
+    "WorkerSettings",
     "load_settings",
 )
