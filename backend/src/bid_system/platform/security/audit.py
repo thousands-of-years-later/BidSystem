@@ -26,4 +26,3 @@ class SecurityAuditEvent:
     target_type: str
     target_id: str
     outcome: str
-

@@ -62,9 +62,9 @@ $env:DATABASE_URL = "postgresql+psycopg://bid_system:bid_system_dev@localhost:54
 docker compose --env-file backend/.env -f deploy/compose.yaml run --rm minio-init
 ```
 
-宿主机上的 Python 后端读取 `backend/.env`。系统环境变量优先于 `.env`；若后端以后也作为 Compose 服务运行，应将数据库、Redis和MinIO地址改为对应的 `*_DOCKER` 值。
+宿主机上的 Python 后端读取 `backend/.env`。系统环境变量优先于 `.env`；若后端以后也作为 Compose 服务运行，应将数据库、Redis、RabbitMQ和MinIO地址改为对应的 `*_DOCKER` 值。
 
-`APP_ENV` 支持 `dev`、`test` 和 `prod`。PostgreSQL、Redis和MinIO是关键启动依赖，连接失败会阻止应用启动；LLM和OCR默认延迟连接，启用时必须通过环境变量或外部密钥系统注入凭据。配置和日志不会输出密钥原文。
+`APP_ENV` 支持 `dev`、`test` 和 `prod`。PostgreSQL、Redis和MinIO是应用关键启动依赖，RabbitMQ是Celery Worker的消息代理；连接失败会阻止对应进程启动。LLM和OCR默认延迟连接，启用时必须通过环境变量或外部密钥系统注入凭据。配置和日志不会输出密钥原文。
 
 ## 日志与可观测性
 
@@ -84,9 +84,9 @@ METRICS_EXPORT_INTERVAL_SECONDS=60
 
 ## Celery Worker
 
-异步任务使用Celery 5.6和Redis broker。PostgreSQL中的
+异步任务使用Celery 5.6和RabbitMQ broker；Redis只承载缓存、锁和临时状态。PostgreSQL中的
 `platform.task_execution` 是任务状态、幂等和死信的权威数据源；未配置Celery
-result backend，Redis不保存正式业务状态。
+result backend，RabbitMQ和Redis都不保存正式业务状态。
 
 当前仅定义了 `documents.parse` 的类型化消息契约。由于文档模块和解析工作流尚未
 落地，该任务不会注册到生产Worker，避免把未实现的解析流程报告为成功。
@@ -107,8 +107,8 @@ docker compose --env-file backend/.env -f deploy/compose.yaml up -d --build api 
 docker compose --env-file backend/.env -f deploy/compose.yaml ps
 ```
 
-Worker采用late acknowledgement、单次预取、有上限任务超时和Redis visibility
-timeout。收到 `TERM` 时Celery执行warm shutdown，在途任务可在Compose配置的停止
+Worker采用late acknowledgement、单次预取和有上限任务超时。收到 `TERM`
+时Celery执行warm shutdown，在途任务可在Compose配置的停止
 宽限期内完成。
 
 常用 Python 客户端依赖：

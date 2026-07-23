@@ -228,7 +228,7 @@ backend/src/bid_system/platform/
 ├── config/                    # 环境配置与密钥引用
 ├── database/                  # session、transaction、outbox 基础设施
 ├── object_store/              # MinIO
-├── queue/                     # Redis/任务队列适配
+├── queue/                     # RabbitMQ任务队列与Redis临时状态适配
 ├── llm/                       # OpenAI-compatible/Anthropic/local adapters
 ├── ocr/                       # OCR provider adapters
 ├── search/                    # PostgreSQL FTS/pgvector
@@ -261,7 +261,8 @@ shared/
 - 异步传播：使用 `outbox_event`，消费者必须幂等。
 - 长任务：队列消息只携带 ID 和版本，不携带大型 DocumentIR。
 - 原文件和大型解析产物：MinIO；数据库保存哈希、URI、版本和元数据。
-- Redis：仅队列、锁、缓存和临时状态，不作为权威状态。
+- RabbitMQ：仅承载异步任务消息，不作为任务状态或业务数据的权威存储。
+- Redis：仅承载锁、缓存和临时状态，不作为权威状态。
 - 向量结果：只做召回，不能直接作为合规判断证据。
 
 ## 10. 线上 Skill 与 Prompt

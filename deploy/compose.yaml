@@ -1,6 +1,24 @@
 name: bid-system
 
 services:
+  migrate:
+    image: bid-system-backend:local
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    restart: "no"
+    command:
+      - python
+      - -m
+      - alembic
+      - upgrade
+      - head
+    environment:
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql+psycopg://bid_system:bid_system_dev@postgres:5432/bid_system}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     image: bid-system-backend:local
     build:
@@ -15,9 +33,21 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-bid_system}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-bid_system_dev_secret}
       MINIO_BUCKET: ${MINIO_BUCKET:-bid-system}
+      AUTH_ENABLED: ${AUTH_ENABLED:-true}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-RS256}
+      JWT_ACTIVE_KEY_ID: ${JWT_ACTIVE_KEY_ID}
+      JWT_SIGNING_PRIVATE_KEY: ${JWT_SIGNING_PRIVATE_KEY}
+      JWT_VERIFICATION_KEYS: ${JWT_VERIFICATION_KEYS}
+      JWT_ISSUER: ${JWT_ISSUER:-bid-system}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-bid-system-api}
+      INITIAL_MANAGER_USERNAME: ${INITIAL_MANAGER_USERNAME}
+      INITIAL_MANAGER_PASSWORD: ${INITIAL_MANAGER_PASSWORD}
+      AUTH_DEFAULT_TENANT_ID: ${AUTH_DEFAULT_TENANT_ID:-default}
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -47,6 +77,7 @@ services:
       APP_ENV: ${APP_ENV:-dev}
       DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql+psycopg://bid_system:bid_system_dev@postgres:5432/bid_system}
       REDIS_URL: ${REDIS_URL_DOCKER:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL_DOCKER:-amqp://bid_system:bid_system_dev@rabbitmq:5672//}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT_DOCKER:-minio:9000}
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-bid_system}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-bid_system_dev_secret}
@@ -54,9 +85,13 @@ services:
       WORKER_QUEUE_NAME: ${WORKER_QUEUE_NAME:-bid-system}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
@@ -110,6 +145,30 @@ services:
       retries: 10
       start_period: 5s
 
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-bid_system}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-bid_system_dev}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_DEFAULT_VHOST:-/}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${RABBITMQ_AMQP_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test:
+        - CMD
+        - rabbitmq-diagnostics
+        - -q
+        - ping
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
   minio:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     restart: unless-stopped
@@ -153,4 +212,5 @@ services:
 
 volumes:
   postgres_data:
+  rabbitmq_data:
   minio_data:

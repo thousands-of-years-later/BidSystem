@@ -60,4 +60,3 @@ class LocalAccount:
             password_hash=password_hash,
             password_version=self.password_version + 1,
         )
-

@@ -72,12 +72,8 @@ def test_create_app_exposes_metadata_routes_and_unique_operation_ids() -> None:
         "request_id": health_response.headers["X-Request-ID"],
     }
     assert health_response.headers["X-App-Version"] == "0.1.0"
-    assert version_response.json() == {
-        "code": "SUCCESS",
-        "message": "success",
-        "data": {"version": "0.1.0"},
-        "request_id": version_response.headers["X-Request-ID"],
-    }
+    assert version_response.status_code == 401
+    assert version_response.json()["code"] == "AUTHENTICATION_REQUIRED"
     operation_ids = [
         operation["operationId"]
         for path_item in schema_response.json()["paths"].values()

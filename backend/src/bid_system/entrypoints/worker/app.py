@@ -25,11 +25,10 @@ def create_celery_app(
         service_name=resolved_settings.tracing.service_name,
         environment=resolved_settings.environment.value,
     )
-    app = Celery("bid_system", broker=resolved_settings.redis.url.get_secret_value())
+    app = Celery("bid_system", broker=resolved_settings.celery.broker_url.get_secret_value())
     app.conf.accept_content = ("json",)
     app.conf.broker_connection_retry = True
     app.conf.broker_connection_retry_on_startup = True
-    app.conf.broker_transport_options = {"visibility_timeout": worker.visibility_timeout_seconds}
     app.conf.enable_utc = True
     app.conf.result_backend = None
     app.conf.task_acks_late = True

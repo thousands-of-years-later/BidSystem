@@ -3,9 +3,13 @@
 from bid_system.modules.identity.application.ports import (
     IdentityAuthenticationRepository,
     IdentityReader,
+    PasswordEncoder,
     PasswordVerifier,
 )
-from bid_system.modules.identity.infrastructure.passwords import Argon2PasswordVerifier
+from bid_system.modules.identity.infrastructure.passwords import (
+    Argon2PasswordEncoder,
+    Argon2PasswordVerifier,
+)
 from bid_system.modules.identity.infrastructure.repository import SqlAlchemyIdentityReader
 from bid_system.platform.config import AuthSettings
 from bid_system.platform.database.transaction import AsyncTransactionManager
@@ -26,10 +30,17 @@ def build_identity_authentication_repository(
 
 def build_password_verifier(settings: AuthSettings) -> PasswordVerifier:
     """Wire identity password verification to the configured Argon2id adapter."""
-    return Argon2PasswordVerifier(
-        PasswordHasher(
-            memory_cost_kib=settings.argon2_memory_cost_kib,
-            time_cost=settings.argon2_time_cost,
-            parallelism=settings.argon2_parallelism,
-        )
+    return Argon2PasswordVerifier(_password_hasher(settings))
+
+
+def build_password_encoder(settings: AuthSettings) -> PasswordEncoder:
+    """Wire account registration to the configured Argon2id encoder."""
+    return Argon2PasswordEncoder(_password_hasher(settings))
+
+
+def _password_hasher(settings: AuthSettings) -> PasswordHasher:
+    return PasswordHasher(
+        memory_cost_kib=settings.argon2_memory_cost_kib,
+        time_cost=settings.argon2_time_cost,
+        parallelism=settings.argon2_parallelism,
     )

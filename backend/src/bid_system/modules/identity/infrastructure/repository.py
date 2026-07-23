@@ -2,13 +2,17 @@
 
 from datetime import datetime, timedelta
 
+from psycopg.errors import UniqueViolation
 from sqlalchemy import distinct, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bid_system.modules.identity.application.ports import (
     RefreshRotationResult,
     RefreshRotationStatus,
+    RegistrationRecord,
 )
+from bid_system.modules.identity.domain.access import IdentityRole
 from bid_system.modules.identity.domain.account import LocalAccount
 from bid_system.modules.identity.domain.membership import TenantMembership
 from bid_system.modules.identity.domain.session import (
@@ -25,6 +29,7 @@ from bid_system.modules.identity.infrastructure.models import (
     RolePermissionModel,
     TenantMembershipModel,
 )
+from bid_system.shared.contracts.errors import BusinessConflictError
 
 
 class SqlAlchemyIdentityReader:
@@ -90,6 +95,74 @@ class SqlAlchemyIdentityReader:
                 revoked_at=session.revoked_at,
             )
         )
+
+    async def manager_exists_for_update(self, tenant_id: str) -> bool:
+        role_result = await self._session.execute(
+            select(RoleModel)
+            .where(
+                RoleModel.tenant_id == tenant_id,
+                RoleModel.role_code == IdentityRole.MANAGER.value,
+            )
+            .with_for_update()
+        )
+        role = role_result.scalar_one_or_none()
+        if role is None:
+            raise RuntimeError("Required manager role has not been migrated")
+        membership_result = await self._session.execute(
+            select(MembershipRoleModel.membership_id)
+            .join(
+                TenantMembershipModel,
+                TenantMembershipModel.membership_id == MembershipRoleModel.membership_id,
+            )
+            .where(
+                MembershipRoleModel.role_id == role.role_id,
+                TenantMembershipModel.tenant_id == tenant_id,
+            )
+            .limit(1)
+        )
+        return membership_result.scalar_one_or_none() is not None
+
+    async def add_registration(self, record: RegistrationRecord) -> None:
+        role_result = await self._session.execute(
+            select(RoleModel.role_id).where(
+                RoleModel.tenant_id == record.membership.tenant_id,
+                RoleModel.role_code == record.role.value,
+            )
+        )
+        role_id = role_result.scalar_one_or_none()
+        if role_id is None:
+            raise RuntimeError("Required identity role has not been migrated")
+        try:
+            self._session.add(
+                IdentityAccountModel(
+                    user_id=record.account.user_id,
+                    login_identifier=record.account.login_identifier,
+                    password_hash=record.account.password_hash,
+                    status=record.account.status,
+                    password_version=record.account.password_version,
+                )
+            )
+            await self._session.flush()
+            self._session.add(
+                TenantMembershipModel(
+                    membership_id=record.membership.membership_id,
+                    user_id=record.membership.user_id,
+                    tenant_id=record.membership.tenant_id,
+                    status=record.membership.status,
+                )
+            )
+            await self._session.flush()
+            self._session.add(
+                MembershipRoleModel(
+                    membership_id=record.membership.membership_id,
+                    role_id=role_id,
+                )
+            )
+            await self._session.flush()
+        except IntegrityError as error:
+            if isinstance(error.orig, UniqueViolation):
+                raise BusinessConflictError from error
+            raise
 
     async def rotate_refresh_session(
         self,

@@ -5,8 +5,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bid_system.modules.identity.domain.account import AccountStatus
-from bid_system.modules.identity.domain.membership import MembershipStatus
+from bid_system.modules.identity.application.ports import RegistrationRecord
+from bid_system.modules.identity.domain.access import IdentityRole, PermissionCode
+from bid_system.modules.identity.domain.account import AccountStatus, LocalAccount
+from bid_system.modules.identity.domain.membership import MembershipStatus, TenantMembership
 from bid_system.modules.identity.infrastructure.models import (
     IdentityAccountModel,
     MembershipRoleModel,
@@ -17,6 +19,71 @@ from bid_system.modules.identity.infrastructure.models import (
     TenantMembershipModel,
 )
 from bid_system.modules.identity.infrastructure.repository import SqlAlchemyIdentityReader
+from bid_system.shared.contracts.errors import BusinessConflictError
+
+
+@pytest.mark.asyncio
+async def test_registration_persists_account_membership_and_seeded_role(
+    db_session: AsyncSession,
+) -> None:
+    repository = SqlAlchemyIdentityReader(db_session)
+    account = LocalAccount.register(
+        user_id="registered-user-1",
+        login_identifier="registered_1",
+        password_hash="$argon2id$encoded",
+    )
+    membership = TenantMembership.create(
+        membership_id="registered-membership-1",
+        user_id=account.user_id,
+        tenant_id="default",
+        roles=frozenset({IdentityRole.MANAGER.value}),
+        permissions=frozenset(permission.value for permission in PermissionCode),
+    )
+
+    assert await repository.manager_exists_for_update("default") is False
+    await repository.add_registration(
+        RegistrationRecord(
+            account=account,
+            membership=membership,
+            role=IdentityRole.MANAGER,
+        )
+    )
+
+    assert await repository.manager_exists_for_update("default") is True
+    resolved = await repository.get_membership(account.user_id, "default")
+    assert resolved is not None
+    assert resolved.roles == frozenset({IdentityRole.MANAGER.value})
+    assert resolved.permissions == frozenset(permission.value for permission in PermissionCode)
+
+
+@pytest.mark.asyncio
+async def test_registration_maps_duplicate_username_to_business_conflict(
+    db_session: AsyncSession,
+) -> None:
+    repository = SqlAlchemyIdentityReader(db_session)
+
+    async def add(user_id: str, membership_id: str) -> None:
+        await repository.add_registration(
+            RegistrationRecord(
+                account=LocalAccount.register(
+                    user_id=user_id,
+                    login_identifier="duplicate_1",
+                    password_hash="$argon2id$encoded",
+                ),
+                membership=TenantMembership.create(
+                    membership_id=membership_id,
+                    user_id=user_id,
+                    tenant_id="default",
+                    roles=frozenset({IdentityRole.EMPLOYEE.value}),
+                    permissions=frozenset(),
+                ),
+                role=IdentityRole.EMPLOYEE,
+            )
+        )
+
+    await add("duplicate-user-1", "duplicate-membership-1")
+    with pytest.raises(BusinessConflictError):
+        await add("duplicate-user-2", "duplicate-membership-2")
 
 
 @pytest.mark.asyncio

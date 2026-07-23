@@ -50,4 +50,3 @@ def test_denies_cross_tenant_inactive_or_missing_permission(
     assert decision.allowed is False
     with pytest.raises(PermissionDeniedError):
         PermissionEvaluator.require(decision)
-

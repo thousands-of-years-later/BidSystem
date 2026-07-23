@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Protocol
 
+from bid_system.modules.identity.domain.access import IdentityRole
 from bid_system.modules.identity.domain.account import LocalAccount
 from bid_system.modules.identity.domain.membership import TenantMembership
 from bid_system.modules.identity.domain.session import RefreshSession
@@ -36,6 +37,35 @@ class PasswordVerifier(Protocol):
     """Adaptive password verification port with missing-account timing equalization."""
 
     def verify(self, password: str, encoded_hash: str | None) -> PasswordCheckResult: ...
+
+
+class PasswordEncoder(Protocol):
+    """One-way password encoding used only while creating local accounts."""
+
+    def hash(self, password: str) -> str: ...
+
+
+@dataclass(frozen=True)
+class RegistrationRecord:
+    """Complete identity aggregate persisted atomically during account creation."""
+
+    account: LocalAccount
+    membership: TenantMembership
+    role: IdentityRole
+
+
+class RegistrationStore(Protocol):
+    """Identity registration writes and serialized manager bootstrap lookup."""
+
+    async def manager_exists_for_update(self, tenant_id: str) -> bool: ...
+
+    async def get_membership(
+        self,
+        user_id: str,
+        tenant_id: str,
+    ) -> TenantMembership | None: ...
+
+    async def add_registration(self, record: RegistrationRecord) -> None: ...
 
 
 class AuthenticationStore(Protocol):
@@ -95,6 +125,7 @@ class IdentityAuthenticationRepository(
     IdentityReader,
     AuthenticationStore,
     RefreshSessionStore,
+    RegistrationStore,
     Protocol,
 ):
     """Combined identity capability assembled only at the bootstrap boundary."""

@@ -17,3 +17,13 @@ class Argon2PasswordVerifier:
             return PasswordCheckResult(valid=False, updated_hash=None)
         result = self._password_hasher.verify_and_update(password, encoded_hash)
         return PasswordCheckResult(valid=result.valid, updated_hash=result.updated_hash)
+
+
+class Argon2PasswordEncoder:
+    """Encode newly registered passwords with the configured Argon2id policy."""
+
+    def __init__(self, password_hasher: PasswordHasher) -> None:
+        self._password_hasher = password_hasher
+
+    def hash(self, password: str) -> str:
+        return self._password_hasher.hash_password(password)

@@ -6,16 +6,18 @@ from typing import Annotated
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from starlette.exceptions import HTTPException
 from starlette.responses import JSONResponse
 
 from bid_system.bootstrap.dependencies import (
     build_identity_authentication_repository,
+    build_password_encoder,
     build_password_verifier,
 )
 from bid_system.entrypoints.api.dependencies import (
     RequestContext,
+    get_current_principal,
     get_database_transaction,
     get_redis_resource,
     get_request_context,
@@ -27,18 +29,29 @@ from bid_system.modules.identity.application.authenticate import (
     AuthenticateLocalAccountHandler,
 )
 from bid_system.modules.identity.application.ports import RefreshRotationStatus
+from bid_system.modules.identity.application.register import (
+    RegisterLocalAccountCommand,
+    RegisterLocalAccountHandler,
+)
 from bid_system.modules.identity.application.resolve_identity import (
     ResolveIdentityHandler,
     ResolveIdentityQuery,
+)
+from bid_system.modules.identity.domain.access import (
+    IdentityRole,
+    PermissionCode,
+    RegistrationCredentials,
 )
 from bid_system.platform.config import AuthSettings
 from bid_system.platform.database.transaction import AsyncTransactionManager
 from bid_system.platform.queue.redis import RedisResource
 from bid_system.platform.security.authentication import (
     AccessTokenIssuer,
+    AuthenticatedPrincipal,
     RefreshTokenDigest,
     RefreshTokenGenerator,
 )
+from bid_system.platform.security.authorization import PermissionEvaluator
 from bid_system.platform.security.rate_limit import (
     OutageMode,
     RateLimitKey,
@@ -63,6 +76,12 @@ REFRESH_RATE_POLICY = RateLimitPolicy(
     window_seconds=60,
     outage_mode=OutageMode.DENY,
 )
+REGISTER_RATE_POLICY = RateLimitPolicy(
+    capacity=5,
+    window_seconds=3_600,
+    outage_mode=OutageMode.DENY,
+)
+REGISTER_RATE_ACTION = "accounts.create"
 
 
 class LoginRequest(BaseModel):
@@ -70,9 +89,8 @@ class LoginRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    login_identifier: str = Field(min_length=1, max_length=MAX_LOGIN_IDENTIFIER_LENGTH)
+    username: str = Field(min_length=1, max_length=MAX_LOGIN_IDENTIFIER_LENGTH)
     password: str = Field(min_length=1)
-    tenant_id: str = Field(min_length=1, max_length=64)
 
     @field_validator("password")
     @classmethod
@@ -88,6 +106,37 @@ class AccessTokenResponse(BaseModel):
     access_token: str
     token_type: str
     expires_in: int
+
+
+class LoginResponse(AccessTokenResponse):
+    """Access credential and non-sensitive current account facts."""
+
+    user_id: str
+    username: str
+    role: IdentityRole
+
+
+class RegisterRequest(BaseModel):
+    """Manager-authorized local-account registration payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=1, max_length=MAX_LOGIN_IDENTIFIER_LENGTH)
+    password: str = Field(min_length=1)
+    role: IdentityRole
+
+    @model_validator(mode="after")
+    def validate_credentials(self) -> "RegisterRequest":
+        RegistrationCredentials.create(username=self.username, password=self.password)
+        return self
+
+
+class RegisterResponse(BaseModel):
+    """Created account facts that are safe to return to its manager."""
+
+    user_id: str
+    username: str
+    role: IdentityRole
 
 
 class LogoutResponse(BaseModel):
@@ -163,6 +212,17 @@ def _token_response(access_token: str, expires_in: int) -> AccessTokenResponse:
     )
 
 
+def _identity_roles(values: frozenset[str]) -> frozenset[IdentityRole]:
+    return frozenset(role for role in IdentityRole if role.value in values)
+
+
+def _single_identity_role(values: frozenset[str]) -> IdentityRole:
+    roles = _identity_roles(values)
+    if len(roles) != 1:
+        raise AuthenticationError
+    return next(iter(roles))
+
+
 def _require_auth_enabled(request: Request) -> AuthSettings:
     settings = get_settings(request).auth
     if not settings.enabled:
@@ -173,7 +233,7 @@ def _require_auth_enabled(request: Request) -> AuthSettings:
 @router.post(
     "/login",
     name="authentication_login",
-    response_model=SuccessResponse[AccessTokenResponse],
+    response_model=SuccessResponse[LoginResponse],
 )
 async def login(
     payload: LoginRequest,
@@ -181,14 +241,14 @@ async def login(
     response: Response,
     transaction: Annotated[AsyncTransactionManager, Depends(get_database_transaction)],
     context: Annotated[RequestContext, Depends(get_request_context)],
-) -> SuccessResponse[AccessTokenResponse]:
+) -> SuccessResponse[LoginResponse]:
     """Authenticate a local account and create its first refresh session."""
     client_ip = context.client_ip or "unknown"
     await _enforce_limit(
         request,
         key=RateLimitKey.login(
             client_ip=client_ip,
-            account_identifier=payload.login_identifier,
+            account_identifier=payload.username,
         ),
         policy=LOGIN_RATE_POLICY,
     )
@@ -203,9 +263,9 @@ async def login(
         password_verifier=build_password_verifier(settings),
     ).handle(
         AuthenticateLocalAccountCommand(
-            login_identifier=payload.login_identifier,
+            login_identifier=payload.username,
             password=payload.password,
-            tenant_id=payload.tenant_id,
+            tenant_id=settings.default_tenant_id,
             session_id=str(uuid4()),
             family_id=str(uuid4()),
             refresh_token_digest=RefreshTokenDigest.digest(refresh_token),
@@ -229,7 +289,67 @@ async def login(
         max_age=settings.refresh_token_idle_ttl_seconds,
     )
     return success_response(
-        data=_token_response(access_token, settings.access_token_ttl_seconds),
+        data=LoginResponse(
+            **_token_response(access_token, settings.access_token_ttl_seconds).model_dump(),
+            user_id=identity.user_id,
+            username=payload.username.strip().casefold(),
+            role=_single_identity_role(identity.roles),
+        ),
+        request_id=context.request_id,
+    )
+
+
+@router.post(
+    "/register",
+    name="authentication_register",
+    response_model=SuccessResponse[RegisterResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def register(
+    payload: RegisterRequest,
+    request: Request,
+    transaction: Annotated[AsyncTransactionManager, Depends(get_database_transaction)],
+    context: Annotated[RequestContext, Depends(get_request_context)],
+    principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
+) -> SuccessResponse[RegisterResponse]:
+    """Create a local account inside the authenticated manager's tenant."""
+    PermissionEvaluator.require(
+        PermissionEvaluator.evaluate(
+            principal,
+            required_permissions=frozenset({PermissionCode.ACCOUNTS_CREATE.value}),
+            tenant_id=principal.tenant_id,
+        )
+    )
+    await _enforce_limit(
+        request,
+        key=RateLimitKey.sensitive(
+            tenant_id=principal.tenant_id,
+            actor_id=principal.user_id,
+            action=f"{REGISTER_RATE_ACTION}:{context.client_ip or 'unknown'}",
+        ),
+        policy=REGISTER_RATE_POLICY,
+    )
+    settings = _require_auth_enabled(request)
+    registered = await RegisterLocalAccountHandler(
+        store=build_identity_authentication_repository(transaction),
+        password_encoder=build_password_encoder(settings),
+    ).handle(
+        RegisterLocalAccountCommand(
+            username=payload.username,
+            password=payload.password,
+            role=payload.role,
+            tenant_id=principal.tenant_id,
+            user_id=str(uuid4()),
+            membership_id=str(uuid4()),
+            actor_user_id=principal.user_id,
+        )
+    )
+    return success_response(
+        data=RegisterResponse(
+            user_id=registered.user_id,
+            username=registered.username,
+            role=registered.role,
+        ),
         request_id=context.request_id,
     )
 

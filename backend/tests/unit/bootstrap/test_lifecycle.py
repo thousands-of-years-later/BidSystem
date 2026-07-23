@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import pytest
 from fastapi import FastAPI
 
-from bid_system.bootstrap.lifecycle import create_lifespan
+from bid_system.bootstrap.lifecycle import ContainerLifecycle, create_lifespan
 from bid_system.platform.config import AppSettings
 
 
@@ -55,3 +55,30 @@ async def test_lifespan_attaches_started_container_and_closes_it() -> None:
         assert app.state.container.started
 
     assert created[0].closed
+
+
+@pytest.mark.asyncio
+async def test_lifespan_provisions_manager_after_container_start() -> None:
+    settings = _settings()
+    events: list[str] = []
+
+    class OrderedContainer(FakeContainer):
+        async def start(self) -> None:
+            await super().start()
+            events.append("started")
+
+    async def provisioner(container: ContainerLifecycle) -> None:
+        assert isinstance(container, FakeContainer)
+        assert container.started
+        events.append("provisioned")
+
+    app = FastAPI(
+        lifespan=create_lifespan(
+            settings_loader=lambda: settings,
+            container_factory=OrderedContainer,
+            manager_provisioner=provisioner,
+        )
+    )
+
+    async with app.router.lifespan_context(app):
+        assert events == ["started", "provisioned"]

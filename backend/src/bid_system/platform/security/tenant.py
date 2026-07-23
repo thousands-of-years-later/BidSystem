@@ -40,4 +40,3 @@ class TenantContext:
             user_id=principal.user_id,
             session_id=principal.session_id,
         )
-

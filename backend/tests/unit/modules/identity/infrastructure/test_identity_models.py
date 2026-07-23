@@ -28,4 +28,3 @@ def test_refresh_session_persists_digest_but_never_raw_token() -> None:
     assert "token_digest" in table.c
     assert "refresh_token" not in table.c
     assert table.c.token_digest.unique is True
-

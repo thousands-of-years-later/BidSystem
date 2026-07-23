@@ -46,6 +46,7 @@ def test_builds_cohesive_settings_views() -> None:
     assert settings.environment is Environment.TEST
     assert settings.database.url.get_secret_value().endswith("/bid_system")
     assert settings.redis.max_connections > 0
+    assert settings.celery.broker_url.get_secret_value().startswith("amqp://")
     assert settings.minio.endpoint == "localhost:9000"
     assert settings.runtime_limits.retry_max_attempts >= 1
     assert settings.auth.enabled is False
@@ -66,6 +67,8 @@ def test_enabled_auth_accepts_complete_configuration() -> None:
         JWT_VERIFICATION_KEYS=_verification_keys(),
         JWT_ISSUER="bid-system",
         JWT_AUDIENCE="bid-system-api",
+        INITIAL_MANAGER_USERNAME="manager",
+        INITIAL_MANAGER_PASSWORD="secure123",
     )
 
     assert settings.auth == AuthSettings(
@@ -88,7 +91,23 @@ def test_enabled_auth_accepts_complete_configuration() -> None:
         argon2_memory_cost_kib=19_456,
         argon2_time_cost=2,
         argon2_parallelism=1,
+        default_tenant_id="default",
+        initial_manager_username="manager",
+        initial_manager_password=SecretStr("secure123"),
     )
+
+
+def test_enabled_auth_requires_initial_manager_credentials() -> None:
+    with pytest.raises(ValidationError, match="INITIAL_MANAGER_USERNAME"):
+        _settings(
+            AUTH_ENABLED="true",
+            JWT_ALGORITHM="RS256",
+            JWT_ACTIVE_KEY_ID="test-key-1",
+            JWT_SIGNING_PRIVATE_KEY=TEST_PRIVATE_KEY,
+            JWT_VERIFICATION_KEYS=_verification_keys(),
+            JWT_ISSUER="bid-system",
+            JWT_AUDIENCE="bid-system-api",
+        )
 
 
 def test_enabled_auth_rejects_symmetric_jwt_algorithm() -> None:
@@ -148,6 +167,19 @@ def test_rejects_invalid_runtime_limits(field: str, value: str) -> None:
 def test_rejects_retry_max_delay_below_base_delay() -> None:
     with pytest.raises(ValidationError, match="RETRY_MAX_DELAY_SECONDS"):
         _settings(RETRY_BASE_DELAY_SECONDS="2", RETRY_MAX_DELAY_SECONDS="1")
+
+
+@pytest.mark.parametrize(
+    "broker_url",
+    (
+        "redis://localhost:6379/0",
+        "amqp://",
+        "amqp://rabbitmq:5672//",
+    ),
+)
+def test_rejects_invalid_celery_broker(broker_url: str) -> None:
+    with pytest.raises(ValidationError, match="CELERY_BROKER_URL"):
+        _settings(CELERY_BROKER_URL=broker_url)
 
 
 @pytest.mark.parametrize(

@@ -6,13 +6,13 @@ from collections.abc import Mapping, Sequence
 REDACTED = "***"
 SENSITIVE_KEY_PATTERN = re.compile(
     r"(?:authorization|cookie|api[_-]?key|access[_-]?key|password|secret|token|"
-    r"signing[_-]?key|private[_-]?key|database_url|redis_url)",
+    r"signing[_-]?key|private[_-]?key|database_url|redis_url|broker_url)",
     re.IGNORECASE,
 )
 URL_CREDENTIAL_PATTERN = re.compile(r"(?P<prefix>://[^:/\s]+:)[^@\s]+@")
 SENSITIVE_TEXT_PATTERN = re.compile(
     r"(?P<key>authorization|cookie|api[_-]?key|access[_-]?key|password|secret|token|"
-    r"signing[_-]?key|private[_-]?key|database_url|redis_url)"
+    r"signing[_-]?key|private[_-]?key|database_url|redis_url|broker_url)"
     r"(?P<value>\s*[:=]\s*(?:Bearer\s+)?[^\s,;]+)?",
     re.IGNORECASE,
 )

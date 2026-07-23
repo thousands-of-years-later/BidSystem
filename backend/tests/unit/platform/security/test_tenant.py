@@ -27,4 +27,3 @@ def test_builds_context_only_from_matching_authenticated_tenant() -> None:
 def test_rejects_client_selected_cross_tenant_context() -> None:
     with pytest.raises(TenantContextError, match="Tenant context is invalid"):
         TenantContext.from_principal(_principal(), requested_tenant_id="tenant-2")
-

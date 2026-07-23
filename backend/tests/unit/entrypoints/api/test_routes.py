@@ -101,5 +101,9 @@ def test_authentication_routes_are_exposed_under_versioned_api() -> None:
     paths = app.openapi()["paths"]
 
     assert "/api/v1/auth/login" in paths
+    assert "/api/v1/auth/register" in paths
     assert "/api/v1/auth/refresh" in paths
     assert "/api/v1/auth/logout" in paths
+    assert "security" not in paths["/api/v1/auth/login"]["post"]
+    assert paths["/api/v1/auth/register"]["post"]["security"] == [{"HTTPBearer": []}]
+    assert paths["/api/v1/version"]["get"]["security"] == [{"HTTPBearer": []}]

@@ -45,4 +45,3 @@ class PermissionEvaluator:
     def require(decision: AuthorizationDecision) -> None:
         if not decision.allowed:
             raise PermissionDeniedError
-

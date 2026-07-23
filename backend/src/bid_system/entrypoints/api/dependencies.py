@@ -5,7 +5,8 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Annotated, Protocol, runtime_checkable
 
-from fastapi import Depends, Request
+from fastapi import Request, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from bid_system.bootstrap.container import ApplicationContainer, LifecycleResource
 from bid_system.bootstrap.dependencies import build_identity_reader
@@ -23,6 +24,8 @@ from bid_system.platform.security.authentication import (
     TokenValidationError,
 )
 from bid_system.shared.contracts.errors import AuthenticationError
+
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def get_container(request: Request) -> ApplicationContainer:
@@ -126,15 +129,24 @@ async def resolve_current_principal(
 
 async def get_current_principal(
     request: Request,
-    transaction: Annotated[AsyncTransactionManager, Depends(get_database_transaction)],
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None,
+        Security(bearer_scheme),
+    ],
 ) -> AuthenticatedPrincipal:
     """FastAPI dependency that stores only verified identity in request context."""
-    principal = await resolve_current_principal(
-        authorization_header=request.headers.get("Authorization"),
-        auth_settings=get_settings(request).auth,
-        identity_reader=build_identity_reader(transaction),
-        resolved_at=datetime.now(UTC),
-    )
+    if credentials is None:
+        raise AuthenticationError
+    resource = get_database_resource(request)
+    if not isinstance(resource, DatabaseTransactionResource):
+        raise RuntimeError("Initialized database resource cannot create transactions")
+    async with resource.transaction() as transaction:
+        principal = await resolve_current_principal(
+            authorization_header=f"{credentials.scheme} {credentials.credentials}",
+            auth_settings=get_settings(request).auth,
+            identity_reader=build_identity_reader(transaction),
+            resolved_at=datetime.now(UTC),
+        )
     context = get_request_context(request)
     request.state.request_context = replace(
         context,

@@ -1,12 +1,13 @@
 """FastAPI lifespan factory for explicit resource startup and shutdown."""
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Protocol
 
 from fastapi import FastAPI
 
 from bid_system.bootstrap.container import ApplicationContainer
+from bid_system.bootstrap.identity import provision_initial_manager
 from bid_system.platform.config import AppSettings, load_settings
 from bid_system.platform.telemetry.logging import configure_logging
 from bid_system.platform.telemetry.metrics import configure_metrics, shutdown_metrics
@@ -26,16 +27,26 @@ class ContainerLifecycle(Protocol):
 SettingsLoader = Callable[[], AppSettings]
 ContainerFactory = Callable[[AppSettings], ContainerLifecycle]
 Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
+ManagerProvisioner = Callable[[ContainerLifecycle], Awaitable[None]]
 
 
 def _default_container_factory(settings: AppSettings) -> ContainerLifecycle:
     return ApplicationContainer(settings)
 
 
+async def _default_manager_provisioner(container: ContainerLifecycle) -> None:
+    if not container.settings.auth.enabled:
+        return
+    if not isinstance(container, ApplicationContainer):
+        raise RuntimeError("Enabled authentication requires an application container")
+    await provision_initial_manager(container)
+
+
 def create_lifespan(
     *,
     settings_loader: SettingsLoader = load_settings,
     container_factory: ContainerFactory = _default_container_factory,
+    manager_provisioner: ManagerProvisioner = _default_manager_provisioner,
 ) -> Lifespan:
     """Create a lifespan with injectable boundaries for deterministic tests."""
 
@@ -58,6 +69,7 @@ def create_lifespan(
         container = container_factory(settings)
         try:
             await container.start()
+            await manager_provisioner(container)
             app.state.container = container
             yield
         finally:

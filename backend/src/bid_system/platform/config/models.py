@@ -11,6 +11,7 @@ DEFAULT_DATABASE_POOL_SIZE = 5
 DEFAULT_DATABASE_MAX_OVERFLOW = 10
 DEFAULT_DATABASE_POOL_TIMEOUT_SECONDS = 30.0
 DEFAULT_REDIS_MAX_CONNECTIONS = 20
+DEFAULT_CELERY_BROKER_URL = SecretStr("amqp://bid_system:bid_system_dev@localhost:5672//")
 DEFAULT_HTTP_TIMEOUT_SECONDS = 30.0
 DEFAULT_RETRY_MAX_ATTEMPTS = 3
 DEFAULT_RETRY_BASE_DELAY_SECONDS = 0.5
@@ -39,7 +40,6 @@ DEFAULT_WORKER_QUEUE_NAME = "bid-system"
 DEFAULT_WORKER_CONCURRENCY = 2
 DEFAULT_WORKER_SOFT_TIME_LIMIT_SECONDS = 300
 DEFAULT_WORKER_HARD_TIME_LIMIT_SECONDS = 330
-DEFAULT_WORKER_VISIBILITY_TIMEOUT_SECONDS = 3_600
 DEFAULT_WORKER_MAX_RETRIES = 3
 DEFAULT_WORKER_RETRY_BASE_DELAY_SECONDS = 5
 DEFAULT_WORKER_RETRY_MAX_DELAY_SECONDS = 300
@@ -74,6 +74,14 @@ class RedisSettings(BaseModel):
 
     url: SecretStr
     max_connections: int = Field(ge=1)
+
+
+class CelerySettings(BaseModel):
+    """Celery broker connection settings."""
+
+    model_config = {"frozen": True}
+
+    broker_url: SecretStr
 
 
 class MinioSettings(BaseModel):
@@ -177,7 +185,6 @@ class WorkerSettings(BaseModel):
     concurrency: int = Field(ge=1)
     soft_time_limit_seconds: int = Field(ge=1)
     hard_time_limit_seconds: int = Field(ge=1)
-    visibility_timeout_seconds: int = Field(ge=1)
     max_retries: int = Field(ge=0)
     retry_base_delay_seconds: int = Field(ge=1)
     retry_max_delay_seconds: int = Field(ge=1)
@@ -185,11 +192,9 @@ class WorkerSettings(BaseModel):
 
     @model_validator(mode="after")
     def validate_delivery_windows(self) -> Self:
-        """Keep broker redelivery outside the configured task execution window."""
+        """Validate task execution and retry windows."""
         if self.hard_time_limit_seconds <= self.soft_time_limit_seconds:
             raise ValueError("WORKER_HARD_TIME_LIMIT_SECONDS must exceed the soft limit")
-        if self.visibility_timeout_seconds <= self.hard_time_limit_seconds:
-            raise ValueError("WORKER_VISIBILITY_TIMEOUT_SECONDS must exceed the hard limit")
         if self.retry_max_delay_seconds < self.retry_base_delay_seconds:
             raise ValueError("WORKER_RETRY_MAX_DELAY_SECONDS must be >= the base delay")
         return self
@@ -223,6 +228,9 @@ class AuthSettings(BaseModel):
     argon2_memory_cost_kib: int = Field(ge=DEFAULT_ARGON2_MEMORY_COST_KIB)
     argon2_time_cost: int = Field(ge=DEFAULT_ARGON2_TIME_COST)
     argon2_parallelism: int = Field(ge=DEFAULT_ARGON2_PARALLELISM)
+    default_tenant_id: str = Field(default="default", min_length=1, max_length=64)
+    initial_manager_username: str | None = None
+    initial_manager_password: SecretStr | None = None
 
 
 class ApiSettings(BaseModel):
@@ -300,6 +308,10 @@ class AppSettings(BaseSettings):
         default=DEFAULT_REDIS_MAX_CONNECTIONS,
         ge=1,
         validation_alias="REDIS_MAX_CONNECTIONS",
+    )
+    celery_broker_url: SecretStr = Field(
+        default=DEFAULT_CELERY_BROKER_URL,
+        validation_alias="CELERY_BROKER_URL",
     )
     minio_endpoint: str = Field(min_length=1, validation_alias="MINIO_ENDPOINT")
     minio_access_key: SecretStr = Field(
@@ -397,11 +409,6 @@ class AppSettings(BaseSettings):
         ge=1,
         validation_alias="WORKER_HARD_TIME_LIMIT_SECONDS",
     )
-    worker_visibility_timeout_seconds: int = Field(
-        default=DEFAULT_WORKER_VISIBILITY_TIMEOUT_SECONDS,
-        ge=1,
-        validation_alias="WORKER_VISIBILITY_TIMEOUT_SECONDS",
-    )
     worker_max_retries: int = Field(
         default=DEFAULT_WORKER_MAX_RETRIES,
         ge=0,
@@ -466,6 +473,20 @@ class AppSettings(BaseSettings):
         ge=DEFAULT_ARGON2_PARALLELISM,
         validation_alias="ARGON2_PARALLELISM",
     )
+    auth_default_tenant_id: str = Field(
+        default="default",
+        min_length=1,
+        max_length=64,
+        validation_alias="AUTH_DEFAULT_TENANT_ID",
+    )
+    initial_manager_username: str | None = Field(
+        default=None,
+        validation_alias="INITIAL_MANAGER_USERNAME",
+    )
+    initial_manager_password: SecretStr | None = Field(
+        default=None,
+        validation_alias="INITIAL_MANAGER_PASSWORD",
+    )
     api_title: str = Field(default=DEFAULT_API_TITLE, validation_alias="API_TITLE")
     api_description: str = Field(
         default=DEFAULT_API_DESCRIPTION,
@@ -510,6 +531,22 @@ class AppSettings(BaseSettings):
             raise ValueError("REDIS_URL must use redis:// or rediss://")
         return value
 
+    @field_validator("celery_broker_url")
+    @classmethod
+    def validate_celery_broker_url(cls, value: SecretStr) -> SecretStr:
+        """Require RabbitMQ's AMQP transport for Celery delivery."""
+        parsed = urlsplit(value.get_secret_value())
+        if (
+            parsed.scheme not in {"amqp", "amqps"}
+            or not parsed.hostname
+            or not parsed.username
+            or not parsed.password
+        ):
+            raise ValueError(
+                "CELERY_BROKER_URL must use amqp:// or amqps:// and include broker credentials"
+            )
+        return value
+
     @field_validator("log_level")
     @classmethod
     def validate_log_level(cls, value: str) -> str:
@@ -527,8 +564,7 @@ class AppSettings(BaseSettings):
         )
         if self.refresh_token_idle_ttl_seconds > self.refresh_token_absolute_ttl_seconds:
             raise ValueError(
-                "REFRESH_TOKEN_IDLE_TTL_SECONDS must be <= "
-                "REFRESH_TOKEN_ABSOLUTE_TTL_SECONDS"
+                "REFRESH_TOKEN_IDLE_TTL_SECONDS must be <= REFRESH_TOKEN_ABSOLUTE_TTL_SECONDS"
             )
         if self.auth_enabled and not all(
             (
@@ -552,6 +588,13 @@ class AppSettings(BaseSettings):
             raise ValueError("JWT_VERIFICATION_KEYS key ids must be unique")
         if self.auth_enabled and self.jwt_active_key_id not in verification_key_ids:
             raise ValueError("JWT_ACTIVE_KEY_ID must exist in JWT_VERIFICATION_KEYS")
+        if self.auth_enabled and not (
+            self.initial_manager_username and self._secret_value(self.initial_manager_password)
+        ):
+            raise ValueError(
+                "INITIAL_MANAGER_USERNAME and INITIAL_MANAGER_PASSWORD are required when "
+                "AUTH_ENABLED=true"
+            )
         RuntimeLimitsSettings(
             http_timeout_seconds=self.http_timeout_seconds,
             retry_max_attempts=self.retry_max_attempts,
@@ -614,6 +657,10 @@ class AppSettings(BaseSettings):
     @property
     def redis(self) -> RedisSettings:
         return RedisSettings(url=self.redis_url, max_connections=self.redis_max_connections)
+
+    @property
+    def celery(self) -> CelerySettings:
+        return CelerySettings(broker_url=self.celery_broker_url)
 
     @property
     def minio(self) -> MinioSettings:
@@ -691,7 +738,6 @@ class AppSettings(BaseSettings):
             concurrency=self.worker_concurrency,
             soft_time_limit_seconds=self.worker_soft_time_limit_seconds,
             hard_time_limit_seconds=self.worker_hard_time_limit_seconds,
-            visibility_timeout_seconds=self.worker_visibility_timeout_seconds,
             max_retries=self.worker_max_retries,
             retry_base_delay_seconds=self.worker_retry_base_delay_seconds,
             retry_max_delay_seconds=self.worker_retry_max_delay_seconds,
@@ -715,6 +761,9 @@ class AppSettings(BaseSettings):
             argon2_memory_cost_kib=self.argon2_memory_cost_kib,
             argon2_time_cost=self.argon2_time_cost,
             argon2_parallelism=self.argon2_parallelism,
+            default_tenant_id=self.auth_default_tenant_id,
+            initial_manager_username=self.initial_manager_username,
+            initial_manager_password=self.initial_manager_password,
         )
 
     @property

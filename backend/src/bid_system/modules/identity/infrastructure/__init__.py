@@ -1,2 +1,1 @@
 """Identity persistence adapters."""
-
