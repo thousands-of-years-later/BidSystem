@@ -86,6 +86,20 @@ def test_create_app_exposes_metadata_routes_and_unique_operation_ids() -> None:
     assert len(operation_ids) == len(set(operation_ids))
 
 
+def test_non_production_app_uses_scalar_as_its_api_reference() -> None:
+    settings = make_settings()
+    app = create_app(settings=settings, container_factory=FakeContainer)
+
+    with TestClient(app) as client:
+        docs_response = client.get("/docs")
+        redoc_response = client.get("/redoc")
+
+    assert docs_response.status_code == 200
+    assert "Scalar" in docs_response.text
+    assert "/openapi.json" in docs_response.text
+    assert redoc_response.status_code == 404
+
+
 def test_production_app_disables_documentation_endpoints() -> None:
     settings = make_settings(environment="prod")
     app = create_app(settings=settings, container_factory=FakeContainer)

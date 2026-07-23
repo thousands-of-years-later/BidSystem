@@ -9,8 +9,6 @@
 
 ## 2. 架构边界
 
-项目首期采用模块化单体。业务领域、Agent 运行时和外部基础设施必须保持边界清晰。
-
 ### 2.1 顶层职责
 
 - `backend/src/bid_system/modules/`：核心业务模块，拥有各自的领域事实、用例和数据。
@@ -32,55 +30,13 @@
 - `interfaces/`：HTTP 或事件协议映射，不编写业务规则。
 - `public.py`：其他业务模块可依赖的唯一同步公开门面。
 
-强制边界：
+## 4. 业务功能原子化实现流程（只有业务功能接口设计需要此流程）
 
-- `domain` 不得依赖 FastAPI、SQLAlchemy/ORM、Redis、LLM SDK、Agent Runtime 或具体基础设施。
-- `application` 只能依赖本模块 `domain`、本模块定义的端口和最小 `shared`。
-- `infrastructure` 实现内层定义的端口，不得把 ORM 模型、数据库 Session 或供应商 SDK 类型泄漏到应用层。
-- 跨模块同步调用只经过目标模块 `public.py` 或稳定契约；异步协作使用领域事件/Outbox，消费者必须幂等。
-- 每张业务表只能由所属模块的仓储写入；禁止跨模块直接读写对方表来绕过公开契约。
-- `shared` 中的代码必须至少被两个模块使用、无单模块专属语义且有明确兼容性责任。禁止创建 `shared/utils.py`、`common/service.py` 或无边界 `helpers/`。
-- Agent 只负责推理、选择下一步和解释；数值比较、单位换算、硬规则判定、审核门禁、兼容约束、成本/评分和 CP-SAT 可行性必须由确定性领域或应用服务完成。
-- LLM 输出只能形成候选结果，不能直接发布正式产品事实、招标需求或最终合规结论。
-
-## 3. 依赖方向
-
-允许的主依赖方向：
-
-```text
-entrypoints -> orchestration -> module.application -> module.domain
-      |              |                    ^
-      |              +-> agent_runtime    |
-      +-> bootstrap                       |
-
-module.infrastructure ---- implements ----+
-platform adapters -------- implements ports
-```
-
-允许：
-
-- `entrypoints` 调用应用用例或编排工作流，并将 DTO/Result 映射为协议响应。
-- `orchestration.tools` 调用模块 `public.py` 或 application port。
-- `infrastructure` 依赖本模块 `application/domain` 以实现其端口。
-- `bootstrap` 在最外层完成具体实现与抽象端口的装配。
-- `reporting` 读取稳定查询投影，但不得成为新的权威数据源。
-
-禁止：
-
-- `domain -> application/infrastructure/platform/entrypoints/agent_runtime`。
-- `module A -> module B.infrastructure` 或直接导入模块 B 的内部实体、ORM 模型和数据库表。
-- Agent Tool 直接持有数据库 Session、修改业务表或绕过审核门禁。
-- API 路由、Worker consumer 或 Prompt 中实现抽取后的正式校验、匹配、求解等核心业务规则。
-- 为复用 ORM 模型而共享领域实体。
-- 在模块导入阶段建立网络连接或产生不可控副作用。
-
-## 4. 原子化实现流程
-
-不要一次性生成整个模块代码。复杂功能必须拆解为可独立验证、可回滚的原子步骤，并严格执行以下流程。
+不要一次性生成整个业务功能代码。复杂功能必须拆解为可独立验证、可回滚的原子步骤，并严格执行以下流程。
 
 ### Step 1：制定实施计划（Plan First）
 
-写任何业务代码前，先输出详细 Checklist：
+写功能的业务代码前，先输出详细 Checklist：
 
 1. 列出需要新增/修改的文件路径及具体类、函数或方法名。
 2. 明确每一步的输入、输出及预期副作用。
@@ -141,6 +97,7 @@ platform adapters -------- implements ports
 - 单个函数保持单一职责；复杂分支拆成可命名、可测试的规则或策略。
 - 修改公共契约、数据库结构、事件格式或模块公开门面时，必须说明兼容性与迁移影响，并补充契约测试。
 - 不得在没有确定性证据时将 `UNKNOWN` 当作 `FAIL` 或 `PASS`；冲突数据必须保留冲突状态及证据链。
+- Scalar 是项目唯一的交互式 API 文档入口；所有新增或修改的 HTTP 业务接口必须进入 OpenAPI，并能在 Scalar 中查看和调试。
 
 ## 6. 响应格式
 

@@ -1,9 +1,11 @@
 """FastAPI application factory."""
 
 from fastapi import FastAPI
+from scalar_fastapi import get_scalar_api_reference
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.responses import HTMLResponse
 
 from bid_system import __version__
 from bid_system.bootstrap.lifecycle import ContainerFactory, create_lifespan
@@ -22,6 +24,9 @@ from bid_system.entrypoints.api.router import (
     generate_operation_id,
 )
 from bid_system.platform.config import AppSettings, load_settings
+
+API_DOCS_URL = "/docs"
+OPENAPI_SCHEMA_URL = "/openapi.json"
 
 
 def create_app(
@@ -44,18 +49,38 @@ def create_app(
         title=resolved_settings.api.title,
         description=resolved_settings.api.description,
         version=__version__,
-        docs_url="/docs" if docs_enabled else None,
-        redoc_url="/redoc" if docs_enabled else None,
-        openapi_url="/openapi.json" if docs_enabled else None,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=OPENAPI_SCHEMA_URL if docs_enabled else None,
         generate_unique_id_function=generate_operation_id,
         lifespan=lifespan,
     )
 
+    if docs_enabled:
+        _register_api_reference(app)
     app.include_router(create_root_router())
     app.include_router(create_api_router(resolved_settings.api))
     register_exception_handlers(app)
     _register_middlewares(app, resolved_settings)
     return app
+
+
+def _register_api_reference(app: FastAPI) -> None:
+    """Expose Scalar as the only interactive API reference."""
+
+    async def scalar_api_reference() -> HTMLResponse:
+        return get_scalar_api_reference(
+            openapi_url=OPENAPI_SCHEMA_URL,
+            title=f"{app.title} - API Reference",
+        )
+
+    # WHY: The documentation renderer is infrastructure, not part of the public API contract.
+    app.add_api_route(
+        API_DOCS_URL,
+        scalar_api_reference,
+        include_in_schema=False,
+        methods=["GET"],
+    )
 
 
 def _register_middlewares(app: FastAPI, settings: AppSettings) -> None:
