@@ -44,6 +44,8 @@ DEFAULT_WORKER_MAX_RETRIES = 3
 DEFAULT_WORKER_RETRY_BASE_DELAY_SECONDS = 5
 DEFAULT_WORKER_RETRY_MAX_DELAY_SECONDS = 300
 DEFAULT_WORKER_PREFETCH_MULTIPLIER = 1
+DEFAULT_WORKER_DEAD_LETTER_QUEUE_NAME = "bid-system.dead"
+DEFAULT_WORKER_DELIVERY_LIMIT = 5
 SUPPORTED_LOG_LEVELS = frozenset({"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"})
 DEVELOPMENT_CREDENTIALS = frozenset({"bid_system_dev", "bid_system_dev_secret"})
 
@@ -189,6 +191,8 @@ class WorkerSettings(BaseModel):
     retry_base_delay_seconds: int = Field(ge=1)
     retry_max_delay_seconds: int = Field(ge=1)
     prefetch_multiplier: int = Field(ge=1)
+    dead_letter_queue_name: str = Field(min_length=1, pattern=r"^[A-Za-z0-9._-]+$")
+    delivery_limit: int = Field(ge=1)
 
     @model_validator(mode="after")
     def validate_delivery_windows(self) -> Self:
@@ -197,6 +201,8 @@ class WorkerSettings(BaseModel):
             raise ValueError("WORKER_HARD_TIME_LIMIT_SECONDS must exceed the soft limit")
         if self.retry_max_delay_seconds < self.retry_base_delay_seconds:
             raise ValueError("WORKER_RETRY_MAX_DELAY_SECONDS must be >= the base delay")
+        if self.dead_letter_queue_name == self.queue_name:
+            raise ValueError("WORKER_DEAD_LETTER_QUEUE_NAME must differ from WORKER_QUEUE_NAME")
         return self
 
 
@@ -428,6 +434,15 @@ class AppSettings(BaseSettings):
         default=DEFAULT_WORKER_PREFETCH_MULTIPLIER,
         ge=1,
         validation_alias="WORKER_PREFETCH_MULTIPLIER",
+    )
+    worker_dead_letter_queue_name: str = Field(
+        default=DEFAULT_WORKER_DEAD_LETTER_QUEUE_NAME,
+        validation_alias="WORKER_DEAD_LETTER_QUEUE_NAME",
+    )
+    worker_delivery_limit: int = Field(
+        default=DEFAULT_WORKER_DELIVERY_LIMIT,
+        ge=1,
+        validation_alias="WORKER_DELIVERY_LIMIT",
     )
     auth_enabled: bool = Field(default=False, validation_alias="AUTH_ENABLED")
     jwt_algorithm: str | None = Field(default=None, validation_alias="JWT_ALGORITHM")
@@ -742,6 +757,8 @@ class AppSettings(BaseSettings):
             retry_base_delay_seconds=self.worker_retry_base_delay_seconds,
             retry_max_delay_seconds=self.worker_retry_max_delay_seconds,
             prefetch_multiplier=self.worker_prefetch_multiplier,
+            dead_letter_queue_name=self.worker_dead_letter_queue_name,
+            delivery_limit=self.worker_delivery_limit,
         )
 
     @property

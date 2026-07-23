@@ -84,6 +84,14 @@ services:
       MINIO_BUCKET: ${MINIO_BUCKET:-bid-system}
       WORKER_QUEUE_NAME: ${WORKER_QUEUE_NAME:-bid-system}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+      WORKER_SOFT_TIME_LIMIT_SECONDS: ${WORKER_SOFT_TIME_LIMIT_SECONDS:-300}
+      WORKER_HARD_TIME_LIMIT_SECONDS: ${WORKER_HARD_TIME_LIMIT_SECONDS:-330}
+      WORKER_MAX_RETRIES: ${WORKER_MAX_RETRIES:-3}
+      WORKER_RETRY_BASE_DELAY_SECONDS: ${WORKER_RETRY_BASE_DELAY_SECONDS:-5}
+      WORKER_RETRY_MAX_DELAY_SECONDS: ${WORKER_RETRY_MAX_DELAY_SECONDS:-300}
+      WORKER_PREFETCH_MULTIPLIER: ${WORKER_PREFETCH_MULTIPLIER:-1}
+      WORKER_DEAD_LETTER_QUEUE_NAME: ${WORKER_DEAD_LETTER_QUEUE_NAME:-bid-system.dead}
+      WORKER_DELIVERY_LIMIT: ${WORKER_DELIVERY_LIMIT:-5}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -98,11 +106,8 @@ services:
     stop_grace_period: ${WORKER_STOP_GRACE_PERIOD:-6m}
     healthcheck:
       test:
-        - CMD-SHELL
-        - >-
-          bid-system-worker-health &&
-          celery -A bid_system.entrypoints.worker.app:celery_app inspect ping
-          --destination "worker@$${HOSTNAME}" --timeout 5
+        - CMD
+        - bid-system-worker-health
       interval: 15s
       timeout: 10s
       retries: 4

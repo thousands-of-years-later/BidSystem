@@ -84,9 +84,14 @@ METRICS_EXPORT_INTERVAL_SECONDS=60
 
 ## Celery Worker
 
-异步任务使用Celery 5.6和RabbitMQ broker；Redis只承载缓存、锁和临时状态。PostgreSQL中的
-`platform.task_execution` 是任务状态、幂等和死信的权威数据源；未配置Celery
-result backend，RabbitMQ和Redis都不保存正式业务状态。
+异步任务使用Celery 5.6和RabbitMQ broker；Redis只承载缓存、锁和临时状态。Celery
+负责late acknowledgement、有限重试、超时和Worker丢失重投；RabbitMQ quorum queue
+负责持久化投递、delivery limit和死信。系统未配置Celery result backend，正式业务进度和
+结果必须由所属业务模块持久化，PostgreSQL不保存通用技术任务执行账本。
+
+`platform.outbox_event`仍用于保证业务事务与任务发布的可靠交接，它不能被Celery发布重试
+替代。Worker只对明确的`RetryableTaskError`执行有界重试；未知异常和非法消息不会自动
+重试。系统提供至少一次执行语义，产生业务副作用的Handler必须使用领域标识保证幂等。
 
 当前仅定义了 `documents.parse` 的类型化消息契约。由于文档模块和解析工作流尚未
 落地，该任务不会注册到生产Worker，避免把未实现的解析流程报告为成功。
@@ -97,8 +102,9 @@ result backend，RabbitMQ和Redis都不保存正式业务状态。
 bid-system-worker
 ```
 
-`bid-system-worker-health` 会探测Worker依赖的PostgreSQL、Redis和MinIO；Compose
-健康检查随后再通过定向Celery ping确认目标Worker仍能响应控制命令。
+`bid-system-worker-health`会探测Worker依赖的RabbitMQ、PostgreSQL、Redis和MinIO。RabbitMQ 4
+不再允许Celery默认使用的transient非独占控制队列，因此Worker关闭remote control、
+mingle和gossip；容器主进程退出时由Compose重启策略恢复，不使用`inspect ping`。
 
 API与Worker使用同一镜像、不同进程入口：
 

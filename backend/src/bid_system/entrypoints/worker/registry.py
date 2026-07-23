@@ -5,7 +5,9 @@ from typing import Protocol
 
 from celery import Celery
 
-from bid_system.entrypoints.worker.lifecycle import WorkerRuntime
+from bid_system.entrypoints.worker.lifecycle import AsyncOperation
+from bid_system.entrypoints.worker.tasks import RetryableTaskError
+from bid_system.platform.config import WorkerSettings
 from bid_system.shared.contracts.tasks import DOCUMENT_PARSE_TASK_TYPE, DocumentParseTaskInput
 
 
@@ -13,6 +15,12 @@ class DocumentParseHandler(Protocol):
     """Future orchestration boundary for product-document parsing."""
 
     async def __call__(self, command: DocumentParseTaskInput) -> None: ...
+
+
+class WorkerRuntimePort(Protocol):
+    """Minimal async bridge required by registered Celery tasks."""
+
+    def run[ResultT](self, operation: AsyncOperation[ResultT]) -> ResultT: ...
 
 
 @dataclass(frozen=True)
@@ -26,14 +34,23 @@ def register_task_handlers(
     app: Celery,
     *,
     handlers: WorkerTaskHandlers,
-    runtime: WorkerRuntime,
+    runtime: WorkerRuntimePort,
+    worker: WorkerSettings,
 ) -> tuple[str, ...]:
     """Register only handlers backed by real application workflows."""
     registered: list[str] = []
     if handlers.documents_parse is not None:
         handler = handlers.documents_parse
 
-        @app.task(name=DOCUMENT_PARSE_TASK_TYPE, typing=True)
+        @app.task(
+            name=DOCUMENT_PARSE_TASK_TYPE,
+            typing=True,
+            autoretry_for=(RetryableTaskError,),
+            max_retries=worker.max_retries,
+            retry_backoff=worker.retry_base_delay_seconds,
+            retry_backoff_max=worker.retry_max_delay_seconds,
+            retry_jitter=True,
+        )
         def parse_document(
             *,
             tenant_id: str,
