@@ -53,11 +53,13 @@ def register_task_handlers(
         )
         def parse_document(
             *,
-            tenant_id: str,
             document_version_id: str,
+            tenant_id: str | None = None,
         ) -> None:
+            # WHY: v2 jobs may still contain tenant_id while queued during a rolling
+            # deployment. Documents are global now, so accept but never use it.
+            del tenant_id
             command = DocumentParseTaskInput(
-                tenant_id=tenant_id,
                 document_version_id=document_version_id,
             )
             runtime.run(lambda container: handler(command))

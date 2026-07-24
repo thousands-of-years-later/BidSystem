@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Protocol
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from celery import Celery, Task
 
@@ -71,6 +71,7 @@ def _registered_task(handler: RecordingHandler) -> tuple[Celery, Task]:
     app = Celery("test-worker", broker="memory://")
     app.conf.task_always_eager = True
     app.conf.task_eager_propagates = False
+    app.tasks.pop(DOCUMENT_PARSE_TASK_TYPE, None)
     register_task_handlers(
         app,
         handlers=WorkerTaskHandlers(documents_parse=handler),
@@ -80,13 +81,18 @@ def _registered_task(handler: RecordingHandler) -> tuple[Celery, Task]:
     return app, app.tasks[DOCUMENT_PARSE_TASK_TYPE]
 
 
-def _apply(task: Task, *, tenant_id: str, document_version_id: str) -> TaskResult:
+def _apply(
+    task: Task,
+    *,
+    document_version_id: str,
+    legacy_tenant_id: str | None = None,
+) -> TaskResult:
     apply = task.apply
+    kwargs = {"document_version_id": document_version_id}
+    if legacy_tenant_id is not None:
+        kwargs["tenant_id"] = legacy_tenant_id
     result = apply(
-        kwargs={
-            "tenant_id": tenant_id,
-            "document_version_id": document_version_id,
-        },
+        kwargs=kwargs,
         throw=False,
     )
     return result
@@ -103,12 +109,12 @@ def test_retries_retryable_failure_until_success() -> None:
 
     result = _apply(
         task,
-        tenant_id=str(uuid4()),
         document_version_id=str(uuid4()),
     )
 
     assert result.successful()
     assert len(handler.calls) == 3
+    assert handler.calls[0].schema_version == 3
     assert task.autoretry_for == (RetryableTaskError,)
     assert task.max_retries == 2
     assert task.retry_backoff == 3
@@ -121,9 +127,24 @@ def test_rejects_invalid_message_without_calling_handler() -> None:
 
     result = _apply(
         task,
-        tenant_id="not-a-uuid",
-        document_version_id=str(uuid4()),
+        document_version_id="invalid",
     )
 
     assert result.failed()
     assert handler.calls == []
+
+
+def test_accepts_legacy_tenant_argument_without_scoping_document() -> None:
+    handler = RecordingHandler()
+    _, task = _registered_task(handler)
+    document_version_id = str(uuid4())
+
+    result = _apply(
+        task,
+        document_version_id=document_version_id,
+        legacy_tenant_id="legacy-tenant",
+    )
+
+    assert result.successful()
+    assert handler.calls[0].document_version_id == UUID(document_version_id)
+    assert not hasattr(handler.calls[0], "tenant_id")

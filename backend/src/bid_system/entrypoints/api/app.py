@@ -86,7 +86,12 @@ def _register_api_reference(app: FastAPI) -> None:
 def _register_middlewares(app: FastAPI, settings: AppSettings) -> None:
     """Register from innermost to outermost; Starlette prepends each middleware."""
     api = settings.api
-    app.add_middleware(RequestBodyLimitMiddleware, max_body_bytes=api.max_request_body_bytes)
+    app.add_middleware(
+        RequestBodyLimitMiddleware,
+        max_body_bytes=api.max_request_body_bytes,
+        document_upload_path_prefix=f"{api.prefix}/documents",
+        document_upload_max_body_bytes=settings.documents.max_request_body_bytes,
+    )
     app.add_middleware(GZipMiddleware, minimum_size=api.gzip_minimum_size_bytes)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(api.trusted_hosts))
     app.add_middleware(

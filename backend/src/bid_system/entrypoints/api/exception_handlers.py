@@ -13,6 +13,11 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from bid_system.entrypoints.api.dependencies import RequestContext
 from bid_system.entrypoints.api.responses import error_response
+from bid_system.modules.documents.domain.errors import (
+    DuplicateDocumentContentError,
+    FileSizeLimitExceededError,
+    UnsupportedDocumentTypeError,
+)
 from bid_system.shared.contracts.errors import (
     ApplicationError,
     AuthenticationError,
@@ -36,6 +41,7 @@ HTTP_ERROR_CODES: dict[int, ErrorCode] = {
     status.HTTP_405_METHOD_NOT_ALLOWED: ErrorCode.METHOD_NOT_ALLOWED,
     status.HTTP_409_CONFLICT: ErrorCode.CONFLICT,
     status.HTTP_413_CONTENT_TOO_LARGE: ErrorCode.REQUEST_BODY_TOO_LARGE,
+    status.HTTP_415_UNSUPPORTED_MEDIA_TYPE: ErrorCode.UNSUPPORTED_DOCUMENT_TYPE,
     status.HTTP_429_TOO_MANY_REQUESTS: ErrorCode.RATE_LIMITED,
     status.HTTP_503_SERVICE_UNAVAILABLE: ErrorCode.SERVICE_UNAVAILABLE,
 }
@@ -47,6 +53,7 @@ HTTP_ERROR_MESSAGES: dict[int, str] = {
     status.HTTP_405_METHOD_NOT_ALLOWED: "请求方法不受支持",
     status.HTTP_409_CONFLICT: "请求与当前资源状态冲突",
     status.HTTP_413_CONTENT_TOO_LARGE: "请求体超过大小限制",
+    status.HTTP_415_UNSUPPORTED_MEDIA_TYPE: "文件类型不受支持",
     status.HTTP_429_TOO_MANY_REQUESTS: "请求过于频繁",
     status.HTTP_503_SERVICE_UNAVAILABLE: "服务暂时不可用",
 }
@@ -68,6 +75,27 @@ class ExceptionHttpMapping:
 EXCEPTION_HTTP_MAPPINGS: tuple[
     tuple[type[BidSystemError], ExceptionHttpMapping], ...
 ] = (
+    (
+        FileSizeLimitExceededError,
+        ExceptionHttpMapping(
+            status.HTTP_413_CONTENT_TOO_LARGE,
+            ErrorCode.FILE_TOO_LARGE,
+        ),
+    ),
+    (
+        UnsupportedDocumentTypeError,
+        ExceptionHttpMapping(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            ErrorCode.UNSUPPORTED_DOCUMENT_TYPE,
+        ),
+    ),
+    (
+        DuplicateDocumentContentError,
+        ExceptionHttpMapping(
+            status.HTTP_409_CONFLICT,
+            ErrorCode.DUPLICATE_DOCUMENT_CONTENT,
+        ),
+    ),
     (
         ResourceNotFoundError,
         ExceptionHttpMapping(status.HTTP_404_NOT_FOUND, ErrorCode.NOT_FOUND),
@@ -191,7 +219,7 @@ async def business_exception_handler(
     mapping = _business_exception_mapping(exception)
     return error_response(
         status_code=mapping.status_code,
-        code=mapping.code,
+        code=exception.code,
         message=exception.public_message,
         request_id=_request_id(request),
     )

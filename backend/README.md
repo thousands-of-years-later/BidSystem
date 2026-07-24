@@ -17,6 +17,7 @@ Docker Compose 提供：
 - Redis，端口 `6379`
 - MinIO S3 兼容对象存储，API 端口 `9000`、管理控制台端口 `9001`
 - `minio-init` 一次性任务，自动创建默认 bucket `bid-system`
+- ClamAV 1.5 文档病毒扫描服务，端口 `3310`
 
 首次启动前在仓库根目录复制环境变量，并按需修改开发账号和密码：
 
@@ -61,6 +62,10 @@ $env:DATABASE_URL = "postgresql+psycopg://bid_system:bid_system_dev@localhost:54
 ```powershell
 docker compose --env-file backend/.env -f deploy/compose.yaml run --rm minio-init
 ```
+
+后端镜像内置LibreOffice Writer/Impress和中文字体，用于将DOCX/PPTX转换为后续解析统一
+使用的PDF。ClamAV配置允许扫描不超过200MiB的源文件；安全扫描服务不可用时上传接口
+按失败关闭策略返回503，不会绕过扫描。
 
 宿主机上的 Python 后端读取 `backend/.env`。系统环境变量优先于 `.env`；若后端以后也作为 Compose 服务运行，应将数据库、Redis、RabbitMQ和MinIO地址改为对应的 `*_DOCKER` 值。
 

@@ -11,6 +11,10 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from bid_system.modules.documents.infrastructure.models import (
+    DocumentModel,
+    DocumentVersionModel,
+)
 from bid_system.platform.database.models import OrmBase
 from bid_system.platform.database.outbox import OutboxEventModel
 
@@ -22,7 +26,7 @@ if config.config_file_name is not None:
 
 # WHY: importing each infrastructure model is the explicit migration registry; domain modules
 # remain independent of SQLAlchemy and no database connection is opened during import.
-registered_models = (OutboxEventModel,)
+registered_models = (OutboxEventModel, DocumentModel, DocumentVersionModel)
 target_metadata = OrmBase.metadata
 
 

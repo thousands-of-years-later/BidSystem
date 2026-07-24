@@ -33,6 +33,10 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-bid_system}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-bid_system_dev_secret}
       MINIO_BUCKET: ${MINIO_BUCKET:-bid-system}
+      DOCUMENT_CLAMAV_HOST: clamav
+      DOCUMENT_CLAMAV_PORT: 3310
+      DOCUMENT_CLAMAV_TIMEOUT_SECONDS: ${DOCUMENT_CLAMAV_TIMEOUT_SECONDS:-300}
+      DOCUMENT_CONVERSION_TIMEOUT_SECONDS: ${DOCUMENT_CONVERSION_TIMEOUT_SECONDS:-120}
       AUTH_ENABLED: ${AUTH_ENABLED:-true}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-RS256}
       JWT_ACTIVE_KEY_ID: ${JWT_ACTIVE_KEY_ID}
@@ -54,6 +58,8 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      clamav:
+        condition: service_healthy
     healthcheck:
       test:
         - CMD
@@ -82,6 +88,10 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-bid_system}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-bid_system_dev_secret}
       MINIO_BUCKET: ${MINIO_BUCKET:-bid-system}
+      DOCUMENT_CLAMAV_HOST: clamav
+      DOCUMENT_CLAMAV_PORT: 3310
+      DOCUMENT_CLAMAV_TIMEOUT_SECONDS: ${DOCUMENT_CLAMAV_TIMEOUT_SECONDS:-300}
+      DOCUMENT_CONVERSION_TIMEOUT_SECONDS: ${DOCUMENT_CONVERSION_TIMEOUT_SECONDS:-120}
       WORKER_QUEUE_NAME: ${WORKER_QUEUE_NAME:-bid-system}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
       WORKER_SOFT_TIME_LIMIT_SECONDS: ${WORKER_SOFT_TIME_LIMIT_SECONDS:-300}
@@ -103,6 +113,8 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      clamav:
+        condition: service_healthy
     stop_grace_period: ${WORKER_STOP_GRACE_PERIOD:-6m}
     healthcheck:
       test:
@@ -215,7 +227,27 @@ services:
         mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" &&
         mc mb --ignore-existing "local/$${MINIO_BUCKET}"
 
+  clamav:
+    image: clamav/clamav:1.5.3-debian13-slim
+    restart: unless-stopped
+    ports:
+      - "${CLAMAV_PORT:-3310}:3310"
+    volumes:
+      - clamav_data:/var/lib/clamav
+      - ./docker/clamav/clamd.conf:/etc/clamav/clamd.conf:ro
+    healthcheck:
+      test:
+        - CMD
+        - clamdscan
+        - --ping
+        - "3"
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
+
 volumes:
+  clamav_data:
   postgres_data:
   rabbitmq_data:
   minio_data:

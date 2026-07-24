@@ -181,3 +181,17 @@ def test_rejects_request_body_over_configured_limit() -> None:
     assert response.status_code == 413
     assert response.json()["code"] == "REQUEST_BODY_TOO_LARGE"
     assert response.json()["request_id"] == response.headers["X-Request-ID"]
+
+
+def test_document_upload_path_uses_larger_envelope_limit_only_for_post() -> None:
+    settings = _settings(max_request_body_bytes=5)
+    app: FastAPI = create_app(settings=settings, container_factory=FakeContainer)
+
+    @app.post("/api/v1/documents/test-body-limit")
+    async def document_echo(request: Request) -> dict[str, str]:
+        return {"body": (await request.body()).decode("utf-8")}
+
+    with TestClient(app) as client:
+        response = client.post("/api/v1/documents/test-body-limit", content=b"123456")
+
+    assert response.status_code == 200

@@ -48,6 +48,9 @@ def test_builds_cohesive_settings_views() -> None:
     assert settings.redis.max_connections > 0
     assert settings.celery.broker_url.get_secret_value().startswith("amqp://")
     assert settings.minio.endpoint == "localhost:9000"
+    assert settings.documents.clamav_host == "localhost"
+    assert settings.documents.clamav_port == 3310
+    assert settings.documents.max_request_body_bytes > 200 * 1024 * 1024
     assert settings.runtime_limits.retry_max_attempts >= 1
     assert settings.auth.enabled is False
     assert settings.tracing.enabled is False
@@ -157,6 +160,8 @@ def test_production_rejects_insecure_refresh_cookie() -> None:
         ("RETRY_BASE_DELAY_SECONDS", "0"),
         ("LLM_MAX_CONCURRENCY", "0"),
         ("OCR_MAX_CONCURRENCY", "0"),
+        ("DOCUMENT_CLAMAV_PORT", "0"),
+        ("DOCUMENT_CONVERSION_TIMEOUT_SECONDS", "0"),
     ),
 )
 def test_rejects_invalid_runtime_limits(field: str, value: str) -> None:

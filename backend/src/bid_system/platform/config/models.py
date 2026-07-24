@@ -29,6 +29,12 @@ DEFAULT_ARGON2_PARALLELISM = 1
 SUPPORTED_JWT_ALGORITHM = "RS256"
 DEFAULT_GZIP_MINIMUM_SIZE_BYTES = 1024
 DEFAULT_MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024
+DEFAULT_DOCUMENT_UPLOAD_REQUEST_BODY_BYTES = 201 * 1024 * 1024
+DEFAULT_DOCUMENT_CLAMAV_HOST = "localhost"
+DEFAULT_DOCUMENT_CLAMAV_PORT = 3310
+DEFAULT_DOCUMENT_CLAMAV_TIMEOUT_SECONDS = 30.0
+DEFAULT_DOCUMENT_LIBREOFFICE_EXECUTABLE = "libreoffice"
+DEFAULT_DOCUMENT_CONVERSION_TIMEOUT_SECONDS = 120.0
 DEFAULT_READINESS_TIMEOUT_SECONDS = 3.0
 DEFAULT_API_TITLE = "Bid System API"
 DEFAULT_API_DESCRIPTION = "HTTP API for the bid agent platform."
@@ -96,6 +102,19 @@ class MinioSettings(BaseModel):
     secret_key: SecretStr
     bucket: str = Field(min_length=1)
     secure: bool
+
+
+class DocumentProcessingSettings(BaseModel):
+    """Security scanning, conversion, and upload-envelope settings."""
+
+    model_config = {"frozen": True}
+
+    clamav_host: str = Field(min_length=1)
+    clamav_port: int = Field(ge=1, le=65_535)
+    clamav_timeout_seconds: float = Field(gt=0)
+    libreoffice_executable: str = Field(min_length=1)
+    conversion_timeout_seconds: float = Field(gt=0)
+    max_request_body_bytes: int = Field(gt=200 * 1024 * 1024)
 
 
 class ProviderSettings(BaseModel):
@@ -328,6 +347,37 @@ class AppSettings(BaseSettings):
     )
     minio_bucket: str = Field(min_length=1, validation_alias="MINIO_BUCKET")
     minio_secure: bool = Field(default=False, validation_alias="MINIO_SECURE")
+    document_clamav_host: str = Field(
+        default=DEFAULT_DOCUMENT_CLAMAV_HOST,
+        min_length=1,
+        validation_alias="DOCUMENT_CLAMAV_HOST",
+    )
+    document_clamav_port: int = Field(
+        default=DEFAULT_DOCUMENT_CLAMAV_PORT,
+        ge=1,
+        le=65_535,
+        validation_alias="DOCUMENT_CLAMAV_PORT",
+    )
+    document_clamav_timeout_seconds: float = Field(
+        default=DEFAULT_DOCUMENT_CLAMAV_TIMEOUT_SECONDS,
+        gt=0,
+        validation_alias="DOCUMENT_CLAMAV_TIMEOUT_SECONDS",
+    )
+    document_libreoffice_executable: str = Field(
+        default=DEFAULT_DOCUMENT_LIBREOFFICE_EXECUTABLE,
+        min_length=1,
+        validation_alias="DOCUMENT_LIBREOFFICE_EXECUTABLE",
+    )
+    document_conversion_timeout_seconds: float = Field(
+        default=DEFAULT_DOCUMENT_CONVERSION_TIMEOUT_SECONDS,
+        gt=0,
+        validation_alias="DOCUMENT_CONVERSION_TIMEOUT_SECONDS",
+    )
+    document_upload_request_body_bytes: int = Field(
+        default=DEFAULT_DOCUMENT_UPLOAD_REQUEST_BODY_BYTES,
+        gt=200 * 1024 * 1024,
+        validation_alias="DOCUMENT_UPLOAD_REQUEST_BODY_BYTES",
+    )
     llm_enabled: bool = Field(default=False, validation_alias="LLM_ENABLED")
     llm_base_url: str | None = Field(default=None, validation_alias="LLM_BASE_URL")
     llm_api_key: SecretStr | None = Field(default=None, validation_alias="LLM_API_KEY")
@@ -685,6 +735,17 @@ class AppSettings(BaseSettings):
             secret_key=self.minio_secret_key,
             bucket=self.minio_bucket,
             secure=self.minio_secure,
+        )
+
+    @property
+    def documents(self) -> DocumentProcessingSettings:
+        return DocumentProcessingSettings(
+            clamav_host=self.document_clamav_host,
+            clamav_port=self.document_clamav_port,
+            clamav_timeout_seconds=self.document_clamav_timeout_seconds,
+            libreoffice_executable=self.document_libreoffice_executable,
+            conversion_timeout_seconds=self.document_conversion_timeout_seconds,
+            max_request_body_bytes=self.document_upload_request_body_bytes,
         )
 
     @property
